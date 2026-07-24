@@ -1,0 +1,6 @@
+{
+  "name": "ASTROC – Kenali Karirmu",
+  "description": "AI Career Intelligence Platform - CV Analysis, ATS Evaluation, Job Finder with Search Grounding, Match Engine, Skill Gap & Roadmap",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
