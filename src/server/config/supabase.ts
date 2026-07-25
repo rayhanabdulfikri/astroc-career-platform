@@ -1,6 +1,7 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 let supabaseClient: SupabaseClient | null = null;
+let hasLoggedWarning = false;
 
 export function getSupabaseClient(): SupabaseClient | null {
   if (supabaseClient) return supabaseClient;
@@ -9,15 +10,25 @@ export function getSupabaseClient(): SupabaseClient | null {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
 
   if (!url || !key) {
-    console.warn('⚠️ Supabase credentials missing (SUPABASE_URL / SUPABASE_ANON_KEY). Repositories will fallback gracefully if needed.');
+    if (!hasLoggedWarning) {
+      console.warn('⚠️ Supabase credentials missing (SUPABASE_URL / SUPABASE_ANON_KEY). Repositories will fallback gracefully if needed.');
+      hasLoggedWarning = true;
+    }
     return null;
   }
 
-  supabaseClient = createClient(url, key, {
-    auth: {
-      persistSession: false,
-    },
-  });
-
-  return supabaseClient;
+  try {
+    supabaseClient = createClient(url, key, {
+      auth: {
+        persistSession: false,
+      },
+    });
+    return supabaseClient;
+  } catch (err: any) {
+    if (!hasLoggedWarning) {
+      console.warn('⚠️ Supabase initialization note:', err?.message || err);
+      hasLoggedWarning = true;
+    }
+    return null;
+  }
 }

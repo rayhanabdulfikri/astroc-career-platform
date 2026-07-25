@@ -14,7 +14,15 @@ import {
 } from '../../types';
 
 let genAIClient: GoogleGenAI | null = null;
+let hasLoggedKeyWarning = false;
 const CANDIDATE_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+
+function isKeyValid(key?: string): boolean {
+  if (!key) return false;
+  if (key === 'dummy_key_fallback' || key === 'MY_GEMINI_API_KEY' || key === 'your_google_gemini_api_key_here') return false;
+  if (key.startsWith('AQ.') || key.length < 20) return false;
+  return true;
+}
 
 function getAIClient(): GoogleGenAI {
   if (!genAIClient) {
@@ -36,6 +44,15 @@ async function generateContentWithModelFallback(
   contents: string,
   config: any
 ): Promise<any> {
+  const key = process.env.GEMINI_API_KEY;
+  if (!isKeyValid(key)) {
+    if (!hasLoggedKeyWarning) {
+      console.warn('⚠️ Gemini API Key missing or unconfigured. Fast-falling back to mock data.');
+      hasLoggedKeyWarning = true;
+    }
+    throw new Error('API key not valid');
+  }
+
   const ai = getAIClient();
   let lastError: any = null;
 
@@ -50,14 +67,17 @@ async function generateContentWithModelFallback(
       lastError = err;
       const msg = err?.message || '';
       if (msg.includes('API_KEY_INVALID') || msg.includes('API key not valid')) {
-        console.warn(`⚠️ Gemini API Key not valid or unconfigured (${modelName}). Fast-falling back to mock data.`);
+        if (!hasLoggedKeyWarning) {
+          console.warn(`⚠️ Gemini API Key not valid (${modelName}). Fast-falling back to mock data.`);
+          hasLoggedKeyWarning = true;
+        }
         break;
       }
       console.warn(`Model ${modelName} call note: ${msg}, trying next candidate model...`);
     }
   }
 
-  throw lastError || new Error('All candidate Gemini models failed.');
+  throw lastError || new Error('API key not valid');
 }
 
 async function callWithRetry<T>(
@@ -74,12 +94,18 @@ async function callWithRetry<T>(
       return await fn();
     } catch (err: any) {
       attempt++;
+      const msg = err?.message || String(err);
+      const isApiKeyError = msg.includes('API_KEY_INVALID') || msg.includes('API key not valid');
+      if (isApiKeyError) {
+        throw err;
+      }
+
       if (attempt < maxRetries) {
-        console.warn(`⚠️ [Gemini AI ${actionName}] Attempt ${attempt} failed (${err?.message || 'Error'}). Retrying in ${delay}ms...`);
+        console.warn(`⚠️ [Gemini AI ${actionName}] Attempt ${attempt} failed (${msg}). Retrying in ${delay}ms...`);
         await new Promise((res) => setTimeout(res, delay));
         delay *= 2;
       } else {
-        console.error(`❌ [Gemini AI ${actionName}] Error on attempt ${attempt}:`, err?.message || err);
+        console.error(`❌ [Gemini AI ${actionName}] Error on attempt ${attempt}:`, msg);
         throw err;
       }
     }
@@ -123,6 +149,9 @@ export class AIService {
 
   // Generate 768-dim Vector Embeddings for pgvector
   public async generateEmbedding(text: string): Promise<number[]> {
+    if (!isKeyValid(process.env.GEMINI_API_KEY)) {
+      return new Array(768).fill(0);
+    }
     try {
       const ai = getAIClient();
       const res: any = await ai.models.embedContent({
@@ -248,11 +277,12 @@ export class AIService {
       const latency = Date.now() - startTime;
       await logRepository.logAIAction('CV_PARSER', latency, 'success', `Parsed CV: ${fileName}`);
 
-      const cleanSummary = (parsedData.summary && !parsedData.summary.includes('%PDF'))
+      const isPdfRawSummary = /PDF-|\/Filter|\/FlateDecode|\/Length|\/Pages|\/Catalog|\/MediaBox|\/ProcSet|stream|endstream/i.test(parsedData.summary || sanitizedText || '');
+      const isPdfRawName = /PDF-|\/Filter|\/FlateDecode|\/Length|\/Pages|\/Catalog|\/MediaBox|\/ProcSet|stream|endstream/i.test(parsedData.name || '');
+
+      const cleanSummary = (parsedData.summary && !isPdfRawSummary)
         ? parsedData.summary
-        : (sanitizedText.includes('%PDF') || sanitizedText.includes('/Type'))
-          ? `Dokumen CV diunggah: ${fileName}. Profil Professional Kandidat.`
-          : sanitizedText.slice(0, 300);
+        : `Dokumen CV diunggah: ${fileName}. Profil Professional Kandidat.`;
 
       return {
         id: `cv_${Date.now()}`,

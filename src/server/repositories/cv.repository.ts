@@ -53,30 +53,44 @@ export class CVRepository {
 
   public async getActiveCV(): Promise<ParsedCV | null> {
     const supabase = getSupabaseClient();
-    if (!supabase) return this.fallbackCVs[0] || null;
+    let cv = this.fallbackCVs[0] || null;
 
-    const { data } = await supabase.from('cvs').select('*').order('created_at', { ascending: false }).limit(1).maybeSingle();
-    if (!data) return this.fallbackCVs[0] || null;
+    if (supabase) {
+      const { data } = await supabase.from('cvs').select('*').order('created_at', { ascending: false }).limit(1).maybeSingle();
+      if (data) {
+        cv = {
+          id: data.id,
+          fileName: data.file_name,
+          uploadedAt: data.created_at,
+          name: data.parsed_json?.name || 'Kandidat ASTROC',
+          email: data.parsed_json?.email || 'user@example.com',
+          phone: data.parsed_json?.phone || '-',
+          linkedin: data.parsed_json?.linkedin || '-',
+          github: data.parsed_json?.github || '-',
+          portfolio: data.parsed_json?.portfolio || '-',
+          summary: data.parsed_json?.summary || '',
+          education: data.parsed_json?.education || [],
+          experience: data.parsed_json?.experience || [],
+          organization: data.parsed_json?.organization || [],
+          projects: data.parsed_json?.projects || [],
+          achievements: data.parsed_json?.achievements || [],
+          certificates: data.parsed_json?.certificates || [],
+          skills: data.parsed_json?.skills || { hardSkills: [], softSkills: [], languages: [] },
+          rawText: data.raw_text,
+        };
+      }
+    }
+
+    if (!cv) return null;
+
+    // Sanitize any raw PDF header strings from summary or name
+    const isPdfRawSummary = /PDF-|\/Filter|\/FlateDecode|\/Length|\/Pages|\/Catalog|\/MediaBox|\/ProcSet|stream|endstream/i.test(cv.summary || '');
+    const isPdfRawName = /PDF-|\/Filter|\/FlateDecode|\/Length|\/Pages|\/Catalog|\/MediaBox|\/ProcSet|stream|endstream/i.test(cv.name || '');
 
     return {
-      id: data.id,
-      fileName: data.file_name,
-      uploadedAt: data.created_at,
-      name: data.parsed_json?.name || 'Kandidat ASTROC',
-      email: data.parsed_json?.email || 'user@example.com',
-      phone: data.parsed_json?.phone || '-',
-      linkedin: data.parsed_json?.linkedin || '-',
-      github: data.parsed_json?.github || '-',
-      portfolio: data.parsed_json?.portfolio || '-',
-      summary: data.parsed_json?.summary || '',
-      education: data.parsed_json?.education || [],
-      experience: data.parsed_json?.experience || [],
-      organization: data.parsed_json?.organization || [],
-      projects: data.parsed_json?.projects || [],
-      achievements: data.parsed_json?.achievements || [],
-      certificates: data.parsed_json?.certificates || [],
-      skills: data.parsed_json?.skills || { hardSkills: [], softSkills: [], languages: [] },
-      rawText: data.raw_text,
+      ...cv,
+      name: isPdfRawName ? cv.fileName.replace(/\.pdf$/i, '').replace(/[-_]/g, ' ') : cv.name,
+      summary: isPdfRawSummary ? `Dokumen CV diunggah: ${cv.fileName}. Profil Professional Kandidat.` : cv.summary,
     };
   }
 

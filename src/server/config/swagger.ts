@@ -1,4 +1,5 @@
 import { Express } from 'express';
+import swaggerUi from 'swagger-ui-express';
 
 /**
  * Swagger setup — VERCEL SAFE
@@ -10,9 +11,6 @@ import { Express } from 'express';
  */
 export function setupSwagger(app: Express) {
   try {
-    // Dynamic require so a missing package doesn't crash the whole app
-    const swaggerUi = require('swagger-ui-express');
-
     const swaggerSpec = {
       openapi: '3.0.0',
       info: {

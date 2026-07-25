@@ -1,3 +1,6 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
 import express, { Express } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -51,6 +54,9 @@ export function createApp(): Express {
 
   // OpenAPI Swagger Documentation
   setupSwagger(app);
+
+  // Favicon handler
+  app.get('/favicon.ico', (req, res) => res.status(204).end());
 
   // API Routes
   app.use('/api', apiRouter);

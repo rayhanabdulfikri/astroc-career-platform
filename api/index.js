@@ -33,6 +33,7 @@ __export(app_exports, {
   default: () => app_default
 });
 module.exports = __toCommonJS(app_exports);
+var import_dotenv = __toESM(require("dotenv"), 1);
 var import_express14 = __toESM(require("express"), 1);
 var import_cors = __toESM(require("cors"), 1);
 var import_helmet = __toESM(require("helmet"), 1);
@@ -99,9 +100,9 @@ function errorHandler(err, req, res, next) {
 }
 
 // src/server/config/swagger.ts
+var import_swagger_ui_express = __toESM(require("swagger-ui-express"), 1);
 function setupSwagger(app) {
   try {
-    const swaggerUi = require("swagger-ui-express");
     const swaggerSpec = {
       openapi: "3.0.0",
       info: {
@@ -165,7 +166,7 @@ function setupSwagger(app) {
         }
       }
     };
-    app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+    app.use("/api/docs", import_swagger_ui_express.default.serve, import_swagger_ui_express.default.setup(swaggerSpec));
     app.get("/api/docs.json", (req, res) => {
       res.setHeader("Content-Type", "application/json");
       res.json(swaggerSpec);
@@ -185,20 +186,32 @@ var import_express = require("express");
 // src/server/config/supabase.ts
 var import_supabase_js = require("@supabase/supabase-js");
 var supabaseClient = null;
+var hasLoggedWarning = false;
 function getSupabaseClient() {
   if (supabaseClient) return supabaseClient;
   const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
   if (!url || !key) {
-    console.warn("\u26A0\uFE0F Supabase credentials missing (SUPABASE_URL / SUPABASE_ANON_KEY). Repositories will fallback gracefully if needed.");
+    if (!hasLoggedWarning) {
+      console.warn("\u26A0\uFE0F Supabase credentials missing (SUPABASE_URL / SUPABASE_ANON_KEY). Repositories will fallback gracefully if needed.");
+      hasLoggedWarning = true;
+    }
     return null;
   }
-  supabaseClient = (0, import_supabase_js.createClient)(url, key, {
-    auth: {
-      persistSession: false
+  try {
+    supabaseClient = (0, import_supabase_js.createClient)(url, key, {
+      auth: {
+        persistSession: false
+      }
+    });
+    return supabaseClient;
+  } catch (err) {
+    if (!hasLoggedWarning) {
+      console.warn("\u26A0\uFE0F Supabase initialization note:", err?.message || err);
+      hasLoggedWarning = true;
     }
-  });
-  return supabaseClient;
+    return null;
+  }
 }
 
 // src/data/sampleData.ts
@@ -683,28 +696,39 @@ var CVRepository = class {
   }
   async getActiveCV() {
     const supabase = getSupabaseClient();
-    if (!supabase) return this.fallbackCVs[0] || null;
-    const { data } = await supabase.from("cvs").select("*").order("created_at", { ascending: false }).limit(1).maybeSingle();
-    if (!data) return this.fallbackCVs[0] || null;
+    let cv = this.fallbackCVs[0] || null;
+    if (supabase) {
+      const { data } = await supabase.from("cvs").select("*").order("created_at", { ascending: false }).limit(1).maybeSingle();
+      if (data) {
+        cv = {
+          id: data.id,
+          fileName: data.file_name,
+          uploadedAt: data.created_at,
+          name: data.parsed_json?.name || "Kandidat ASTROC",
+          email: data.parsed_json?.email || "user@example.com",
+          phone: data.parsed_json?.phone || "-",
+          linkedin: data.parsed_json?.linkedin || "-",
+          github: data.parsed_json?.github || "-",
+          portfolio: data.parsed_json?.portfolio || "-",
+          summary: data.parsed_json?.summary || "",
+          education: data.parsed_json?.education || [],
+          experience: data.parsed_json?.experience || [],
+          organization: data.parsed_json?.organization || [],
+          projects: data.parsed_json?.projects || [],
+          achievements: data.parsed_json?.achievements || [],
+          certificates: data.parsed_json?.certificates || [],
+          skills: data.parsed_json?.skills || { hardSkills: [], softSkills: [], languages: [] },
+          rawText: data.raw_text
+        };
+      }
+    }
+    if (!cv) return null;
+    const isPdfRawSummary = /PDF-|\/Filter|\/FlateDecode|\/Length|\/Pages|\/Catalog|\/MediaBox|\/ProcSet|stream|endstream/i.test(cv.summary || "");
+    const isPdfRawName = /PDF-|\/Filter|\/FlateDecode|\/Length|\/Pages|\/Catalog|\/MediaBox|\/ProcSet|stream|endstream/i.test(cv.name || "");
     return {
-      id: data.id,
-      fileName: data.file_name,
-      uploadedAt: data.created_at,
-      name: data.parsed_json?.name || "Kandidat ASTROC",
-      email: data.parsed_json?.email || "user@example.com",
-      phone: data.parsed_json?.phone || "-",
-      linkedin: data.parsed_json?.linkedin || "-",
-      github: data.parsed_json?.github || "-",
-      portfolio: data.parsed_json?.portfolio || "-",
-      summary: data.parsed_json?.summary || "",
-      education: data.parsed_json?.education || [],
-      experience: data.parsed_json?.experience || [],
-      organization: data.parsed_json?.organization || [],
-      projects: data.parsed_json?.projects || [],
-      achievements: data.parsed_json?.achievements || [],
-      certificates: data.parsed_json?.certificates || [],
-      skills: data.parsed_json?.skills || { hardSkills: [], softSkills: [], languages: [] },
-      rawText: data.raw_text
+      ...cv,
+      name: isPdfRawName ? cv.fileName.replace(/\.pdf$/i, "").replace(/[-_]/g, " ") : cv.name,
+      summary: isPdfRawSummary ? `Dokumen CV diunggah: ${cv.fileName}. Profil Professional Kandidat.` : cv.summary
     };
   }
   async getLatestAnalysis(cvId) {
@@ -1231,7 +1255,14 @@ var jobRepository = new JobRepository();
 
 // src/server/services/ai.service.ts
 var genAIClient = null;
+var hasLoggedKeyWarning = false;
 var CANDIDATE_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+function isKeyValid(key) {
+  if (!key) return false;
+  if (key === "dummy_key_fallback" || key === "MY_GEMINI_API_KEY" || key === "your_google_gemini_api_key_here") return false;
+  if (key.startsWith("AQ.") || key.length < 20) return false;
+  return true;
+}
 function getAIClient() {
   if (!genAIClient) {
     const key = process.env.GEMINI_API_KEY;
@@ -1247,6 +1278,14 @@ function getAIClient() {
   return genAIClient;
 }
 async function generateContentWithModelFallback(contents, config) {
+  const key = process.env.GEMINI_API_KEY;
+  if (!isKeyValid(key)) {
+    if (!hasLoggedKeyWarning) {
+      console.warn("\u26A0\uFE0F Gemini API Key missing or unconfigured. Fast-falling back to mock data.");
+      hasLoggedKeyWarning = true;
+    }
+    throw new Error("API key not valid");
+  }
   const ai = getAIClient();
   let lastError = null;
   for (const modelName of CANDIDATE_MODELS) {
@@ -1260,13 +1299,16 @@ async function generateContentWithModelFallback(contents, config) {
       lastError = err;
       const msg = err?.message || "";
       if (msg.includes("API_KEY_INVALID") || msg.includes("API key not valid")) {
-        console.warn(`\u26A0\uFE0F Gemini API Key not valid or unconfigured (${modelName}). Fast-falling back to mock data.`);
+        if (!hasLoggedKeyWarning) {
+          console.warn(`\u26A0\uFE0F Gemini API Key not valid (${modelName}). Fast-falling back to mock data.`);
+          hasLoggedKeyWarning = true;
+        }
         break;
       }
       console.warn(`Model ${modelName} call note: ${msg}, trying next candidate model...`);
     }
   }
-  throw lastError || new Error("All candidate Gemini models failed.");
+  throw lastError || new Error("API key not valid");
 }
 async function callWithRetry(actionName, fn, maxRetries = 2, initialDelayMs = 800) {
   let attempt = 0;
@@ -1276,12 +1318,17 @@ async function callWithRetry(actionName, fn, maxRetries = 2, initialDelayMs = 80
       return await fn();
     } catch (err) {
       attempt++;
+      const msg = err?.message || String(err);
+      const isApiKeyError = msg.includes("API_KEY_INVALID") || msg.includes("API key not valid");
+      if (isApiKeyError) {
+        throw err;
+      }
       if (attempt < maxRetries) {
-        console.warn(`\u26A0\uFE0F [Gemini AI ${actionName}] Attempt ${attempt} failed (${err?.message || "Error"}). Retrying in ${delay}ms...`);
+        console.warn(`\u26A0\uFE0F [Gemini AI ${actionName}] Attempt ${attempt} failed (${msg}). Retrying in ${delay}ms...`);
         await new Promise((res) => setTimeout(res, delay));
         delay *= 2;
       } else {
-        console.error(`\u274C [Gemini AI ${actionName}] Error on attempt ${attempt}:`, err?.message || err);
+        console.error(`\u274C [Gemini AI ${actionName}] Error on attempt ${attempt}:`, msg);
         throw err;
       }
     }
@@ -1322,6 +1369,9 @@ var AIService = class {
   }
   // Generate 768-dim Vector Embeddings for pgvector
   async generateEmbedding(text) {
+    if (!isKeyValid(process.env.GEMINI_API_KEY)) {
+      return new Array(768).fill(0);
+    }
     try {
       const ai = getAIClient();
       const res = await ai.models.embedContent({
@@ -1440,7 +1490,9 @@ var AIService = class {
       const parsedData = extractCleanJSON(res.text || "{}");
       const latency = Date.now() - startTime;
       await logRepository.logAIAction("CV_PARSER", latency, "success", `Parsed CV: ${fileName}`);
-      const cleanSummary = parsedData.summary && !parsedData.summary.includes("%PDF") ? parsedData.summary : sanitizedText.includes("%PDF") || sanitizedText.includes("/Type") ? `Dokumen CV diunggah: ${fileName}. Profil Professional Kandidat.` : sanitizedText.slice(0, 300);
+      const isPdfRawSummary = /PDF-|\/Filter|\/FlateDecode|\/Length|\/Pages|\/Catalog|\/MediaBox|\/ProcSet|stream|endstream/i.test(parsedData.summary || sanitizedText || "");
+      const isPdfRawName = /PDF-|\/Filter|\/FlateDecode|\/Length|\/Pages|\/Catalog|\/MediaBox|\/ProcSet|stream|endstream/i.test(parsedData.name || "");
+      const cleanSummary = parsedData.summary && !isPdfRawSummary ? parsedData.summary : `Dokumen CV diunggah: ${fileName}. Profil Professional Kandidat.`;
       return {
         id: `cv_${Date.now()}`,
         fileName,
@@ -2811,6 +2863,7 @@ apiRouter.use("/", admin_routes_default);
 var routes_default = apiRouter;
 
 // src/server/app.ts
+import_dotenv.default.config();
 function createApp() {
   const app = (0, import_express14.default)();
   app.use(
@@ -2839,6 +2892,7 @@ function createApp() {
   app.use(requestLogger);
   app.use(globalRateLimiter);
   setupSwagger(app);
+  app.get("/favicon.ico", (req, res) => res.status(204).end());
   app.use("/api", routes_default);
   app.use("/", routes_default);
   app.use("/api/*", notFoundHandler);
