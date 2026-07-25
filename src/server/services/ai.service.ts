@@ -51,7 +51,7 @@ async function callWithRetry<T>(
       if ((isRateLimit || isTimeout) && attempt < maxRetries) {
         console.warn(`⚠️ [Gemini AI ${actionName}] Attempt ${attempt} failed (${err?.message || 'Error'}). Retrying in ${delay}ms...`);
         await new Promise((res) => setTimeout(res, delay));
-        delay *= 2; // Exponential backoff (1s, 2s, 4s)
+        delay *= 2;
       } else {
         console.error(`❌ [Gemini AI ${actionName}] Fatal error on attempt ${attempt}:`, err?.message || err);
         throw err;
@@ -78,10 +78,25 @@ function extractCleanJSON(text: string): any {
 }
 
 export class AIService {
+  // Generate 768-dim Vector Embeddings for pgvector
+  public async generateEmbedding(text: string): Promise<number[]> {
+    try {
+      const ai = getAIClient();
+      const res: any = await ai.models.embedContent({
+        model: 'text-embedding-004',
+        contents: text.slice(0, 2000),
+      });
+      return res.embedding?.values || res.embeddings?.[0]?.values || new Array(768).fill(0);
+    } catch (err: any) {
+      console.warn('Embedding generation note (fallback vector used):', err.message);
+      return new Array(768).fill(0);
+    }
+  }
+
   // 1. CV PARSER with responseSchema
   public async parseCV(rawCvText: string, fileName: string): Promise<ParsedCV> {
     const startTime = Date.now();
-    const sanitizedText = rawCvText.slice(0, 15000); // Optimize token usage
+    const sanitizedText = rawCvText.slice(0, 15000);
 
     const prompt = loadPrompt('cv_parser.txt', {
       RAW_CV: sanitizedText,
@@ -359,7 +374,7 @@ export class AIService {
     }
   }
 
-  // 3. JOB SEARCH GROUNDING
+  // 3. JOB SEARCH GROUNDING with Staging & Normalization
   public async searchJobsWithSearchGrounding(
     targetPos: TargetPosition,
     cvSkills: string[]
@@ -383,30 +398,41 @@ export class AIService {
         });
       });
 
-      const parsedJobs = extractCleanJSON(res.text || '[]');
+      const rawText = res.text || '[]';
+      await jobRepository.saveRawJob(prompt, rawText);
+
+      const parsedJobs = extractCleanJSON(rawText);
       const latency = Date.now() - startTime;
       await logRepository.logAIAction('JOB_SEARCH_GROUNDING', latency, 'success', `Found jobs via Grounding for ${targetPos.title}`);
 
       if (Array.isArray(parsedJobs) && parsedJobs.length > 0) {
-        const normalizedJobs: JobProcessed[] = parsedJobs.map((j: any, idx: number) => ({
-          id: `job_grounding_${Date.now()}_${idx}`,
-          title: j.title || targetPos.title,
-          company: j.company || 'Tech Enterprise',
-          location: j.location || targetPos.location,
-          salaryRange: j.salaryRange || 'Rp 15,000,000 - Rp 28,000,000 / bulan',
-          employmentType: j.employmentType || 'Full-time',
-          experienceLevel: j.experienceLevel || targetPos.experienceLevel,
-          summary: j.summary || `Lowongan ${j.title || targetPos.title} di ${j.company || 'Perusahaan Tech'}.`,
-          responsibilities: j.responsibilities || ['Mengembangkan fitur software utama'],
-          requirements: j.requirements || ['Pengalaman di bidang terkait'],
-          requiredSkills: j.requiredSkills || cvSkills.slice(0, 6),
-          sourceUrl: j.sourceUrl || 'https://www.google.com/search?q=' + encodeURIComponent(targetPos.title),
-          postedDate: j.postedDate || 'Baru diterbitkan',
-          isActive: true,
-        }));
+        const normalizedJobs: JobProcessed[] = [];
 
-        await jobRepository.saveJobs(normalizedJobs);
-        return normalizedJobs;
+        for (let idx = 0; idx < parsedJobs.length; idx++) {
+          const j = parsedJobs[idx];
+          const jobText = `${j.title || targetPos.title} ${j.company || 'Tech'} ${j.summary || ''} ${j.requirements || ''}`;
+          const embedding = await this.generateEmbedding(jobText);
+
+          normalizedJobs.push({
+            id: `job_grounding_${Date.now()}_${idx}`,
+            title: j.title || targetPos.title,
+            company: j.company || 'Tech Enterprise',
+            location: j.location || targetPos.location,
+            salaryRange: j.salaryRange || 'Rp 15,000,000 - Rp 28,000,000 / bulan',
+            employmentType: j.employmentType || 'Full-time',
+            experienceLevel: j.experienceLevel || targetPos.experienceLevel,
+            summary: j.summary || `Lowongan ${j.title || targetPos.title} di ${j.company || 'Perusahaan Tech'}.`,
+            responsibilities: j.responsibilities || ['Mengembangkan fitur software utama'],
+            requirements: j.requirements || ['Pengalaman di bidang terkait'],
+            requiredSkills: j.requiredSkills || cvSkills.slice(0, 6),
+            sourceUrl: j.sourceUrl || 'https://www.google.com/search?q=' + encodeURIComponent(targetPos.title),
+            postedDate: j.postedDate || 'Baru diterbitkan',
+            isActive: true,
+          });
+        }
+
+        const savedJobs = await jobRepository.saveJobs(normalizedJobs);
+        return savedJobs;
       }
     } catch (err: any) {
       await logRepository.logAIAction('JOB_SEARCH_GROUNDING', Date.now() - startTime, 'error', err?.message || 'Fallback');

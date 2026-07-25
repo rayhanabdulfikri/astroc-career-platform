@@ -8,9 +8,24 @@ import { sendSuccess } from '../utils/response';
 
 export async function getJobs(req: Request, res: Response, next: NextFunction) {
   try {
-    const search = (req.query.q as string || '').toLowerCase();
-    const jobs = await jobRepository.getJobs(search);
-    return sendSuccess(res, { total: jobs.length, jobs });
+    const { q, location, employmentType, experienceLevel, minSalary, page, limit } = req.query;
+
+    const result = await jobRepository.getJobsPaginated({
+      q: q as string,
+      location: location as string,
+      employmentType: employmentType as string,
+      experienceLevel: experienceLevel as string,
+      minSalary: minSalary ? Number(minSalary) : undefined,
+      page: page ? Number(page) : 1,
+      limit: limit ? Number(limit) : 10,
+    });
+
+    return sendSuccess(res, {
+      jobs: result.jobs,
+      total: result.total,
+      page: result.page,
+      totalPages: result.totalPages,
+    });
   } catch (err) {
     next(err);
   }
@@ -36,8 +51,6 @@ export async function searchJobs(req: Request, res: Response, next: NextFunction
     const cvSkills = activeCV ? activeCV.skills.hardSkills : ['React', 'Node.js', 'Python', 'SQL'];
 
     const freshJobs = await aiService.searchJobsWithSearchGrounding(activeTarget, cvSkills);
-    await jobRepository.saveJobs(freshJobs);
-
     const matches = matchingRepository.recalculateMatches(activeCV, freshJobs);
 
     return sendSuccess(res, {
