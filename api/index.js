@@ -26,14 +26,13 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 ));
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-// api/index.ts
-var index_exports = {};
-__export(index_exports, {
-  default: () => index_default
-});
-module.exports = __toCommonJS(index_exports);
-
 // src/server/app.ts
+var app_exports = {};
+__export(app_exports, {
+  createApp: () => createApp,
+  default: () => app_default
+});
+module.exports = __toCommonJS(app_exports);
 var import_express14 = __toESM(require("express"), 1);
 var import_cors = __toESM(require("cors"), 1);
 var import_helmet = __toESM(require("helmet"), 1);
@@ -2825,7 +2824,8 @@ function createApp() {
   return app;
 }
 var app_default = createApp();
-
-// api/index.ts
-var index_default = app_default;
+// Annotate the CommonJS export names for ESM import in node:
+0 && (module.exports = {
+  createApp
+});
 //# sourceMappingURL=index.js.map
