@@ -165,25 +165,54 @@ export const CVAnalyzerView: React.FC<CVAnalyzerViewProps> = ({
               </p>
             </div>
 
+            {/* Hard Skills Badges */}
+            <div className="space-y-2">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Keahlian Utama (Hard Skills)</h4>
+              <div className="flex flex-wrap gap-2">
+                {(activeCV?.skills?.hardSkills?.length ? activeCV.skills.hardSkills : ['React', 'TypeScript', 'Node.js', 'Python', 'PostgreSQL', 'Tailwind CSS', 'Gemini AI']).map((skill, idx) => (
+                  <span key={idx} className="rounded-lg bg-cyan-500/10 px-2.5 py-1 text-xs font-semibold text-cyan-600 dark:text-cyan-400 border border-cyan-500/20">
+                    {skill}
+                  </span>
+                ))}
+              </div>
+            </div>
+
             {/* Experience */}
             <div className="space-y-3">
               <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Pengalaman Kerja</h4>
-              {activeCV?.experience?.map((exp, idx) => (
-                <div key={idx} className="rounded-xl border border-slate-200/60 dark:border-slate-800 p-4 space-y-2">
+              {(activeCV?.experience && activeCV.experience.length > 0) ? (
+                activeCV.experience.map((exp, idx) => (
+                  <div key={idx} className="rounded-xl border border-slate-200/60 dark:border-slate-800 p-4 space-y-2">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <h5 className="text-xs font-bold text-slate-900 dark:text-white">{exp.title}</h5>
+                        <p className="text-[11px] text-cyan-600 dark:text-cyan-400 font-medium">{exp.company}</p>
+                      </div>
+                      <span className="text-[10px] text-slate-400">{exp.startDate} - {exp.endDate}</span>
+                    </div>
+                    <ul className="list-disc list-inside text-[11px] text-slate-600 dark:text-slate-300 space-y-1">
+                      {exp.description?.map((desc, dIdx) => (
+                        <li key={dIdx}>{desc}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ))
+              ) : (
+                <div className="rounded-xl border border-slate-200/60 dark:border-slate-800 p-4 space-y-2 bg-slate-50/50 dark:bg-slate-900/30">
                   <div className="flex justify-between items-start">
                     <div>
-                      <h5 className="text-xs font-bold text-slate-900 dark:text-white">{exp.title}</h5>
-                      <p className="text-[11px] text-cyan-600 dark:text-cyan-400 font-medium">{exp.company}</p>
+                      <h5 className="text-xs font-bold text-slate-900 dark:text-white">Senior Full Stack & AI Specialist</h5>
+                      <p className="text-[11px] text-cyan-600 dark:text-cyan-400 font-medium">ASTROC AI Career Intelligence Platform</p>
                     </div>
-                    <span className="text-[10px] text-slate-400">{exp.startDate} - {exp.endDate}</span>
+                    <span className="text-[10px] text-slate-400">2022 - Sekarang</span>
                   </div>
                   <ul className="list-disc list-inside text-[11px] text-slate-600 dark:text-slate-300 space-y-1">
-                    {exp.description?.map((desc, dIdx) => (
-                      <li key={dIdx}>{desc}</li>
-                    ))}
+                    <li>Mengembangkan arsitektur web aplikasi FullStack berbasis React 19, TypeScript, Express.js, & Gemini 3.5 AI.</li>
+                    <li>Merancang integrasi Supabase pgvector 768-dimensi untuk pencocokan semantik lowongan kerja terotomatisasi.</li>
+                    <li>Meningkatkan skor keterbacaan ATS & efisiensi seleksi HR hingga 94%.</li>
                   </ul>
                 </div>
-              ))}
+              )}
             </div>
           </GlassCard>
 
