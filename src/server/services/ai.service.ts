@@ -48,7 +48,12 @@ async function generateContentWithModelFallback(
       });
     } catch (err: any) {
       lastError = err;
-      console.warn(`Model ${modelName} call note: ${err?.message || 'Error'}, trying next candidate model...`);
+      const msg = err?.message || '';
+      if (msg.includes('API_KEY_INVALID') || msg.includes('API key not valid')) {
+        console.warn(`⚠️ Gemini API Key not valid or unconfigured (${modelName}). Fast-falling back to mock data.`);
+        break;
+      }
+      console.warn(`Model ${modelName} call note: ${msg}, trying next candidate model...`);
     }
   }
 

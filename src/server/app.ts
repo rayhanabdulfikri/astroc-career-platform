@@ -56,8 +56,8 @@ export function createApp(): Express {
   app.use('/api', apiRouter);
   app.use('/', apiRouter);
 
-  // 404 & Global Error Handling
-  app.use(notFoundHandler);
+  // 404 & Global Error Handling (404 only for unhandled /api/* endpoints)
+  app.use('/api/*', notFoundHandler);
   app.use(errorHandler);
 
   // Initialize Background Scheduler — disabled on Vercel Serverless (no persistent processes)

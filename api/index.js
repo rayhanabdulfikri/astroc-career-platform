@@ -1258,7 +1258,12 @@ async function generateContentWithModelFallback(contents, config) {
       });
     } catch (err) {
       lastError = err;
-      console.warn(`Model ${modelName} call note: ${err?.message || "Error"}, trying next candidate model...`);
+      const msg = err?.message || "";
+      if (msg.includes("API_KEY_INVALID") || msg.includes("API key not valid")) {
+        console.warn(`\u26A0\uFE0F Gemini API Key not valid or unconfigured (${modelName}). Fast-falling back to mock data.`);
+        break;
+      }
+      console.warn(`Model ${modelName} call note: ${msg}, trying next candidate model...`);
     }
   }
   throw lastError || new Error("All candidate Gemini models failed.");
@@ -2816,7 +2821,7 @@ function createApp() {
   setupSwagger(app);
   app.use("/api", routes_default);
   app.use("/", routes_default);
-  app.use(notFoundHandler);
+  app.use("/api/*", notFoundHandler);
   app.use(errorHandler);
   if (!process.env.VERCEL && process.env.NODE_ENV !== "test") {
     jobScheduler.startScheduler();
