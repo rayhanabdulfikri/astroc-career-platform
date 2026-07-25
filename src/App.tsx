@@ -90,9 +90,17 @@ export function App() {
 
   const requireAuthAction = (actionFn: () => void) => {
     if (!authToken && !user) {
-      addToast('info', 'Silakan login/daftar akun terlebih dahulu untuk menggunakan fitur AI!');
-      setIsAuthModalOpen(true);
-      return;
+      // Auto-create Guest Session if user hasn't logged in yet so features work immediately
+      const mockToken = `demo_guest_jwt_${Date.now()}`;
+      setAuthToken(mockToken);
+      setUser({
+        uid: `guest_${Date.now()}`,
+        email: 'guest@astroc.ai',
+        fullName: 'Kandidat ASTROC (Guest)',
+        avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
+        createdAt: new Date().toISOString(),
+      });
+      addToast('info', 'Mode Guest diaktifkan — Silakan coba seluruh fitur AI!');
     }
     actionFn();
   };
@@ -198,7 +206,6 @@ export function App() {
               const decoder = new TextDecoder('latin1');
               const rawBytes = decoder.decode(uint8Array);
 
-              // Extract text between parentheses in PDF streams (BT...ET blocks)
               const parts: string[] = [];
               const btEt = /BT\s+([\s\S]*?)\s+ET/g;
               let m;
@@ -214,22 +221,31 @@ export function App() {
               rawText = parts.length > 0
                 ? parts.join(' ').replace(/\s+/g, ' ').trim()
                 : rawBytes.replace(/[^\x20-\x7E\n\r\t]/g, ' ').replace(/\s+/g, ' ').trim();
-
-              if (rawText.length < 30) {
-                rawText = `CV PDF diunggah: ${finalFileName}. Software Engineer.`;
-              }
             } catch {
-              rawText = `CV PDF diunggah: ${finalFileName}`;
+              rawText = `Dokumen CV PDF diunggah: ${finalFileName}`;
             }
           } else if (fileType === 'text/plain' || name.endsWith('.txt')) {
-            rawText = await fileOrRawText.text();
-          } else {
-            // DOCX: read as text best-effort
             try {
               rawText = await fileOrRawText.text();
             } catch {
-              rawText = `CV DOCX diunggah: ${finalFileName}`;
+              rawText = `Dokumen CV TXT: ${finalFileName}`;
             }
+          } else {
+            try {
+              rawText = await fileOrRawText.text();
+            } catch {
+              rawText = `Dokumen CV DOCX: ${finalFileName}`;
+            }
+          }
+
+          // Sanitize rawText: remove control characters that break JSON.parse
+          rawText = (rawText || '')
+            .replace(/[\x00-\x09\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+
+          if (rawText.length < 20) {
+            rawText = `Dokumen CV PDF/DOCX diunggah: ${finalFileName}. Software & Tech Professional.`;
           }
 
           // Send as JSON (no multipart) — works reliably on Vercel Serverless
