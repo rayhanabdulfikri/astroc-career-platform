@@ -198,31 +198,14 @@ export function App() {
 
           addToast('info', 'Mengekstrak teks CV dan menjalankan Gemini AI Engine...');
 
-          // Client-side text extraction for PDF using FileReader + raw byte decoding
+          // Client-side text extraction using PDF.js for clean text without raw %PDF headers
           if (fileType === 'application/pdf' || name.endsWith('.pdf')) {
             try {
-              const arrayBuffer = await fileOrRawText.arrayBuffer();
-              const uint8Array = new Uint8Array(arrayBuffer);
-              const decoder = new TextDecoder('latin1');
-              const rawBytes = decoder.decode(uint8Array);
-
-              const parts: string[] = [];
-              const btEt = /BT\s+([\s\S]*?)\s+ET/g;
-              let m;
-              while ((m = btEt.exec(rawBytes)) !== null) {
-                const strMatch = /\(([^)]*)\)/g;
-                let sm;
-                while ((sm = strMatch.exec(m[1])) !== null) {
-                  const t = sm[1].replace(/\\n/g, '\n').replace(/\\r/g, '\r').replace(/\\\\/g, '\\');
-                  if (t.trim().length > 1) parts.push(t);
-                }
-              }
-
-              rawText = parts.length > 0
-                ? parts.join(' ').replace(/\s+/g, ' ').trim()
-                : rawBytes.replace(/[^\x20-\x7E\n\r\t]/g, ' ').replace(/\s+/g, ' ').trim();
-            } catch {
-              rawText = `Dokumen CV PDF diunggah: ${finalFileName}`;
+              const { extractPDFText } = await import('./utils/pdfExtractor');
+              rawText = await extractPDFText(fileOrRawText);
+            } catch (pdfErr) {
+              console.warn('PDF extraction error:', pdfErr);
+              rawText = `Dokumen CV PDF: ${finalFileName}`;
             }
           } else if (fileType === 'text/plain' || name.endsWith('.txt')) {
             try {
