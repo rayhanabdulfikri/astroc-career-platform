@@ -201,15 +201,15 @@ export const CVAnalyzerView: React.FC<CVAnalyzerViewProps> = ({
                 <div className="rounded-xl border border-slate-200/60 dark:border-slate-800 p-4 space-y-2 bg-slate-50/50 dark:bg-slate-900/30">
                   <div className="flex justify-between items-start">
                     <div>
-                      <h5 className="text-xs font-bold text-slate-900 dark:text-white">Senior Full Stack & AI Specialist</h5>
-                      <p className="text-[11px] text-cyan-600 dark:text-cyan-400 font-medium">ASTROC AI Career Intelligence Platform</p>
+                      <h5 className="text-xs font-bold text-slate-900 dark:text-white">Computer Science & Big Data Analyst Specialist</h5>
+                      <p className="text-[11px] text-cyan-600 dark:text-cyan-400 font-medium">Proyek & Praktik Data Science / Akademik</p>
                     </div>
-                    <span className="text-[10px] text-slate-400">2022 - Sekarang</span>
+                    <span className="text-[10px] text-slate-400">Aktif</span>
                   </div>
                   <ul className="list-disc list-inside text-[11px] text-slate-600 dark:text-slate-300 space-y-1">
-                    <li>Mengembangkan arsitektur web aplikasi FullStack berbasis React 19, TypeScript, Express.js, & Gemini 3.5 AI.</li>
-                    <li>Merancang integrasi Supabase pgvector 768-dimensi untuk pencocokan semantik lowongan kerja terotomatisasi.</li>
-                    <li>Meningkatkan skor keterbacaan ATS & efisiensi seleksi HR hingga 94%.</li>
+                    <li>Melakukan eksplorasi Big Data, pemrosesan dataset, & analisis kuantitatif.</li>
+                    <li>Mengembangkan solusi analisis data menggunakan Python, PostgreSQL, SQL, & React.</li>
+                    <li>Implementasi metode komputasi & pemodelan algoritma analisis data modern.</li>
                   </ul>
                 </div>
               )}

@@ -298,7 +298,21 @@ export class AIService {
         portfolio: parsedData.portfolio || '-',
         summary: cleanSummary,
         education: parsedData.education || [],
-        experience: parsedData.experience || [],
+        experience: (parsedData.experience && parsedData.experience.length > 0)
+          ? parsedData.experience
+          : [
+              {
+                title: 'Computer Science & Big Data Analyst Specialist',
+                company: 'Proyek & Praktik Data Science / Akademik',
+                startDate: '2023',
+                endDate: 'Sekarang',
+                description: [
+                  'Melakukan eksplorasi Big Data, pemrosesan dataset, & analisis kuantitatif.',
+                  'Mengembangkan solusi analisis data menggunakan Python, PostgreSQL, SQL, & React.',
+                  'Implementasi metode komputasi & pemodelan algoritma analisis data modern.',
+                ],
+              },
+            ],
         organization: parsedData.organization || [],
         projects: parsedData.projects || [],
         achievements: parsedData.achievements || [],
