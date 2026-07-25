@@ -5,6 +5,7 @@ export interface AuthUser {
   avatarUrl?: string;
   firebaseUid?: string;
   role: string;
+  createdAt?: string;
 }
 
 export interface UserProfile {
@@ -188,7 +189,7 @@ export interface SkillGapAnalysis {
   totalRequiredSkills: number;
   acquiredCount: number;
   missingCount: number;
-  gapScore: number; // 0-100 readiness
+  gapScore: number;
   acquiredSkills: string[];
   missingSkills: SkillGapItem[];
 }

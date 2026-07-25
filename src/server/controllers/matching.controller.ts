@@ -1,15 +1,28 @@
-import { Request, Response } from 'express';
-import { dbRepository } from '../repositories/database.repository';
+import { Request, Response, NextFunction } from 'express';
+import { matchingRepository } from '../repositories/matching.repository';
+import { cvRepository } from '../repositories/cv.repository';
+import { jobRepository } from '../repositories/job.repository';
 import { sendSuccess } from '../utils/response';
 
-export function getMatching(req: Request, res: Response) {
-  return sendSuccess(res, {
-    matches: dbRepository.jobMatches,
-    topMatch: dbRepository.jobMatches[0] || null,
-  });
+export async function getMatching(req: Request, res: Response, next: NextFunction) {
+  try {
+    const matches = await matchingRepository.getMatches();
+    return sendSuccess(res, {
+      matches,
+      topMatch: matches[0] || null,
+    });
+  } catch (err) {
+    next(err);
+  }
 }
 
-export function calculateMatching(req: Request, res: Response) {
-  dbRepository.calculateInitialMatches();
-  return sendSuccess(res, { status: 'success', matches: dbRepository.jobMatches });
+export async function calculateMatching(req: Request, res: Response, next: NextFunction) {
+  try {
+    const activeCV = await cvRepository.getActiveCV();
+    const jobs = await jobRepository.getJobs();
+    const matches = matchingRepository.recalculateMatches(activeCV, jobs);
+    return sendSuccess(res, { status: 'success', matches });
+  } catch (err) {
+    next(err);
+  }
 }

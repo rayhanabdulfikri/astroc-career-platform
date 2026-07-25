@@ -1,14 +1,13 @@
 import { Router } from 'express';
 import { getActiveCV, uploadCV, analyzeCV } from '../controllers/cv.controller';
 import { aiRateLimiter } from '../middleware/rateLimiter.middleware';
+import { optionalAuth, authenticateToken } from '../middleware/auth.middleware';
 
 const router = Router();
-// Aliases for /api/cv/current and /api/cv/active
-router.get('/cv/current', getActiveCV);
-router.get('/cv/active', getActiveCV);
+router.get('/cv/current', optionalAuth, getActiveCV);
+router.get('/cv/active', optionalAuth, getActiveCV);
 
-// Upload and analyze with AI rate limiter
-router.post('/cv/upload', aiRateLimiter, uploadCV);
-router.post('/cv/analyze', aiRateLimiter, analyzeCV);
+router.post('/cv/upload', optionalAuth, aiRateLimiter, uploadCV);
+router.post('/cv/analyze', optionalAuth, aiRateLimiter, analyzeCV);
 
 export default router;

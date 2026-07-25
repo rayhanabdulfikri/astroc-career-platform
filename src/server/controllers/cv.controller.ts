@@ -1,16 +1,22 @@
 import { Request, Response, NextFunction } from 'express';
-import { dbRepository } from '../repositories/database.repository';
+import { cvRepository } from '../repositories/cv.repository';
+import { matchingRepository } from '../repositories/matching.repository';
+import { jobRepository } from '../repositories/job.repository';
 import { aiService } from '../services/ai.service';
 import { sendSuccess, sendError } from '../utils/response';
 
-export function getActiveCV(req: Request, res: Response) {
-  const activeCV = dbRepository.cvs[0] || null;
-  const latestAnalysis = dbRepository.cvAnalysis.find((a) => a.cvId === activeCV?.id) || dbRepository.cvAnalysis[0] || null;
-  return sendSuccess(res, {
-    activeCV,
-    latestAnalysis,
-    analysis: latestAnalysis,
-  });
+export async function getActiveCV(req: Request, res: Response, next: NextFunction) {
+  try {
+    const activeCV = await cvRepository.getActiveCV();
+    const latestAnalysis = await cvRepository.getLatestAnalysis(activeCV?.id);
+    return sendSuccess(res, {
+      activeCV,
+      latestAnalysis,
+      analysis: latestAnalysis,
+    });
+  } catch (err) {
+    next(err);
+  }
 }
 
 export async function uploadCV(req: Request, res: Response, next: NextFunction) {
@@ -19,7 +25,8 @@ export async function uploadCV(req: Request, res: Response, next: NextFunction) 
     let textContent = rawText || '';
 
     if (!textContent && presetId) {
-      const found = dbRepository.cvs.find((c) => c.id === presetId);
+      const allCVs = cvRepository.getAllCVs();
+      const found = allCVs.find((c) => c.id === presetId);
       if (found) textContent = found.rawText || found.summary;
     }
 
@@ -28,12 +35,13 @@ export async function uploadCV(req: Request, res: Response, next: NextFunction) 
     }
 
     const parsedCV = await aiService.parseCV(textContent, fileName || 'Uploaded_CV.pdf');
-    dbRepository.cvs.unshift(parsedCV);
+    await cvRepository.saveCV(parsedCV);
 
     const analysisResult = await aiService.analyzeCVFullPipeline(parsedCV);
-    dbRepository.cvAnalysis.unshift(analysisResult);
+    await cvRepository.saveAnalysis(analysisResult);
 
-    dbRepository.calculateInitialMatches();
+    const jobs = await jobRepository.getJobs();
+    matchingRepository.recalculateMatches(parsedCV, jobs);
 
     return sendSuccess(res, {
       status: 'success',
@@ -48,12 +56,12 @@ export async function uploadCV(req: Request, res: Response, next: NextFunction) 
 
 export async function analyzeCV(req: Request, res: Response, next: NextFunction) {
   try {
-    const activeCV = dbRepository.cvs[0];
+    const activeCV = await cvRepository.getActiveCV();
     if (!activeCV) {
       return sendError(res, 'No CV uploaded yet', 400);
     }
     const result = await aiService.analyzeCVFullPipeline(activeCV);
-    dbRepository.cvAnalysis.unshift(result);
+    await cvRepository.saveAnalysis(result);
     return sendSuccess(res, { status: 'success', analysis: result });
   } catch (err) {
     next(err);

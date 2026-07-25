@@ -1,19 +1,23 @@
 import { Request, Response, NextFunction } from 'express';
-import { dbRepository } from '../repositories/database.repository';
+import { roadmapRepository } from '../repositories/roadmap.repository';
+import { cvRepository } from '../repositories/cv.repository';
+import { userRepository } from '../repositories/user.repository';
 import { aiService } from '../services/ai.service';
 import { sendSuccess } from '../utils/response';
 
 export async function getRoadmap(req: Request, res: Response, next: NextFunction) {
   try {
-    let roadmap = dbRepository.roadmaps[0];
+    let roadmap = await roadmapRepository.getRoadmap();
     if (!roadmap) {
-      const activeCV = dbRepository.cvs[0];
-      const activeTarget = dbRepository.targetPositions[0];
-      const latestAnalysis = dbRepository.cvAnalysis[0];
+      const activeCV = await cvRepository.getActiveCV();
+      const activeTarget = await userRepository.getTargetPosition();
+      const latestAnalysis = await cvRepository.getLatestAnalysis();
       const score = latestAnalysis ? latestAnalysis.overallCareerScore : 88;
 
-      roadmap = await aiService.generateCareerRoadmapAI(activeCV, activeTarget, score);
-      dbRepository.roadmaps.unshift(roadmap);
+      if (activeCV && activeTarget) {
+        roadmap = await aiService.generateCareerRoadmapAI(activeCV, activeTarget, score);
+        await roadmapRepository.saveRoadmap(roadmap);
+      }
     }
     return sendSuccess(res, { roadmap });
   } catch (err) {
@@ -23,13 +27,17 @@ export async function getRoadmap(req: Request, res: Response, next: NextFunction
 
 export async function generateRoadmap(req: Request, res: Response, next: NextFunction) {
   try {
-    const activeCV = dbRepository.cvs[0];
-    const activeTarget = dbRepository.targetPositions[0];
-    const latestAnalysis = dbRepository.cvAnalysis[0];
+    const activeCV = await cvRepository.getActiveCV();
+    const activeTarget = await userRepository.getTargetPosition();
+    const latestAnalysis = await cvRepository.getLatestAnalysis();
     const score = latestAnalysis ? latestAnalysis.overallCareerScore : 88;
 
+    if (!activeCV || !activeTarget) {
+      return sendSuccess(res, { roadmap: null });
+    }
+
     const roadmap = await aiService.generateCareerRoadmapAI(activeCV, activeTarget, score);
-    dbRepository.roadmaps.unshift(roadmap);
+    await roadmapRepository.saveRoadmap(roadmap);
     return sendSuccess(res, { status: 'success', roadmap });
   } catch (err) {
     next(err);

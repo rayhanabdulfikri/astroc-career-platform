@@ -1,4 +1,8 @@
-import { dbRepository } from '../repositories/database.repository';
+import { userRepository } from '../repositories/user.repository';
+import { cvRepository } from '../repositories/cv.repository';
+import { matchingRepository } from '../repositories/matching.repository';
+import { notificationRepository } from '../repositories/notification.repository';
+import { logRepository } from '../repositories/log.repository';
 import { aiService } from './ai.service';
 
 export class JobSearchScheduler {
@@ -33,7 +37,7 @@ export class JobSearchScheduler {
     console.log('🔍 Running ASTROC Job Search & Normalization Pipeline via Gemini Search Grounding...');
 
     try {
-      const primaryTarget = dbRepository.targetPositions[0] || {
+      const primaryTarget = (await userRepository.getTargetPosition()) || {
         id: 'tgt_01',
         userId: 'usr_01',
         title: 'Full Stack AI Engineer',
@@ -47,19 +51,21 @@ export class JobSearchScheduler {
         updatedAt: new Date().toISOString(),
       };
 
-      const primaryCV = dbRepository.cvs[0];
+      const primaryCV = await cvRepository.getActiveCV();
       const cvSkills = primaryCV ? primaryCV.skills.hardSkills : ['React', 'TypeScript', 'Node.js', 'Python', 'SQL'];
 
       const freshJobs = await aiService.searchJobsWithSearchGrounding(primaryTarget, cvSkills);
-      dbRepository.calculateInitialMatches();
+      const matches = matchingRepository.recalculateMatches(primaryCV, freshJobs);
 
       let highMatchCount = 0;
-      dbRepository.jobMatches.forEach((m) => {
+      const notifications = await notificationRepository.getNotifications();
+
+      matches.forEach((m) => {
         if (m.overallMatchScore >= 85) {
           highMatchCount++;
-          const existingNotif = dbRepository.notifications.find((n) => n.jobId === m.jobId);
+          const existingNotif = notifications.find((n) => n.jobId === m.jobId);
           if (!existingNotif) {
-            dbRepository.addNotification(
+            notificationRepository.addNotification(
               `High Career Match Found! (${m.overallMatchScore}%)`,
               `Lowongan "${m.job.title}" di ${m.job.company} cocok ${m.overallMatchScore}% dengan kualifikasi CV Anda!`,
               m.overallMatchScore,
@@ -73,7 +79,7 @@ export class JobSearchScheduler {
       this.runCount++;
       this.isRunning = false;
 
-      dbRepository.logAIAction(
+      await logRepository.logAIAction(
         'SCHEDULER_CRON',
         1500,
         'success',
@@ -87,7 +93,7 @@ export class JobSearchScheduler {
     } catch (err: any) {
       this.isRunning = false;
       console.error('Scheduler error:', err);
-      dbRepository.logAIAction('SCHEDULER_CRON', 1000, 'error', err?.message || 'Error');
+      await logRepository.logAIAction('SCHEDULER_CRON', 1000, 'error', err?.message || 'Error');
       return { jobsFound: 0, highMatchCount: 0 };
     }
   }

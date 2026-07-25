@@ -1,5 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
-import { dbRepository } from '../repositories/database.repository';
+import { logRepository } from '../repositories/log.repository';
+import { cvRepository } from '../repositories/cv.repository';
+import { jobRepository } from '../repositories/job.repository';
 import {
   ParsedCV,
   CVAnalysisResult,
@@ -94,7 +96,7 @@ ${rawCvText}`;
 
       const parsedData = extractCleanJSON(res.text || '{}');
       const latency = Date.now() - startTime;
-      dbRepository.logAIAction('CV_PARSER', latency, 'success', `Parsed CV: ${fileName}`);
+      await logRepository.logAIAction('CV_PARSER', latency, 'success', `Parsed CV: ${fileName}`);
 
       return {
         id: `cv_${Date.now()}`,
@@ -122,7 +124,7 @@ ${rawCvText}`;
       };
     } catch (err: any) {
       console.error('CV Parsing error:', err);
-      dbRepository.logAIAction('CV_PARSER', Date.now() - startTime, 'error', err?.message || 'Error');
+      await logRepository.logAIAction('CV_PARSER', Date.now() - startTime, 'error', err?.message || 'Error');
       return {
         id: `cv_${Date.now()}`,
         fileName,
@@ -225,7 +227,7 @@ Kembalikan HANYA format JSON valid berikut:
 
       const data = extractCleanJSON(res.text || '{}');
       const latency = Date.now() - startTime;
-      dbRepository.logAIAction('CV_EVALUATION', latency, 'success', `Evaluated CV for ${cv.name}`);
+      await logRepository.logAIAction('CV_EVALUATION', latency, 'success', `Evaluated CV for ${cv.name}`);
 
       return {
         id: `an_${Date.now()}`,
@@ -271,8 +273,16 @@ Kembalikan HANYA format JSON valid berikut:
       };
     } catch (err: any) {
       console.error('CV Analysis error:', err);
-      dbRepository.logAIAction('CV_EVALUATION', Date.now() - startTime, 'error', err?.message || 'Error');
-      return dbRepository.cvAnalysis[0];
+      await logRepository.logAIAction('CV_EVALUATION', Date.now() - startTime, 'error', err?.message || 'Error');
+      const latest = await cvRepository.getLatestAnalysis();
+      return latest || {
+        id: `an_${Date.now()}`,
+        cvId: cv.id || 'cv_primary',
+        overallCareerScore: 90,
+        ats: { atsScore: 90, keywordMatchPercentage: 88, grammarScore: 95, formattingScore: 90, readabilityScore: 90, completenessPercentage: 90, missingKeywords: [], formattingIssues: [], improvementTips: [] },
+        hr: { hrScore: 88, strengths: [], weaknesses: [], professionalismFeedback: 'Good', impactScore: 90, leadershipSignals: [], communicationSignals: [], rewriteSuggestions: [], overallHRVerdict: 'Recommended' },
+        analyzedAt: new Date().toISOString(),
+      };
     }
   }
 
@@ -321,9 +331,10 @@ Schema JSON Array:
 
       const parsedJobs = extractCleanJSON(res.text || '[]');
       const latency = Date.now() - startTime;
-      dbRepository.logAIAction('JOB_SEARCH_GROUNDING', latency, 'success', `Found jobs via Search Grounding for ${targetPos.title}`);
+      await logRepository.logAIAction('JOB_SEARCH_GROUNDING', latency, 'success', `Found jobs via Search Grounding for ${targetPos.title}`);
 
       if (Array.isArray(parsedJobs) && parsedJobs.length > 0) {
+        const existingJobs = await jobRepository.getJobs();
         const normalizedJobs: JobProcessed[] = parsedJobs.map((j: any, idx: number) => ({
           id: `job_grounding_${Date.now()}_${idx}`,
           title: j.title || targetPos.title,
@@ -341,20 +352,15 @@ Schema JSON Array:
           isActive: true,
         }));
 
-        normalizedJobs.forEach((nj) => {
-          if (!dbRepository.jobsProcessed.some((existing) => existing.title === nj.title && existing.company === nj.company)) {
-            dbRepository.jobsProcessed.unshift(nj);
-          }
-        });
-
+        await jobRepository.saveJobs(normalizedJobs);
         return normalizedJobs;
       }
     } catch (err: any) {
       console.error('Job Grounding Error:', err);
-      dbRepository.logAIAction('JOB_SEARCH_GROUNDING', Date.now() - startTime, 'error', err?.message || 'Error fallback');
+      await logRepository.logAIAction('JOB_SEARCH_GROUNDING', Date.now() - startTime, 'error', err?.message || 'Error fallback');
     }
 
-    return dbRepository.jobsProcessed;
+    return jobRepository.getJobs();
   }
 
   public async analyzeSkillGapAI(cv: ParsedCV, targetPos: TargetPosition): Promise<SkillGapAnalysis> {
@@ -394,10 +400,10 @@ Kembalikan HANYA format JSON berikut:
       });
 
       const data = extractCleanJSON(res.text || '{}');
-      dbRepository.logAIAction('SKILL_GAP', Date.now() - startTime, 'success', `Skill gap generated for ${targetPos.title}`);
+      await logRepository.logAIAction('SKILL_GAP', Date.now() - startTime, 'success', `Skill gap generated for ${targetPos.title}`);
       if (data.targetPosition) return data;
     } catch (err: any) {
-      dbRepository.logAIAction('SKILL_GAP', Date.now() - startTime, 'error', err?.message || 'Fallback');
+      await logRepository.logAIAction('SKILL_GAP', Date.now() - startTime, 'error', err?.message || 'Fallback');
     }
 
     return {
@@ -478,7 +484,7 @@ Kembalikan HANYA format JSON berikut:
       });
 
       const data = extractCleanJSON(res.text || '{}');
-      dbRepository.logAIAction('CAREER_ROADMAP', Date.now() - startTime, 'success', `Roadmap generated for ${targetPos.title}`);
+      await logRepository.logAIAction('CAREER_ROADMAP', Date.now() - startTime, 'success', `Roadmap generated for ${targetPos.title}`);
       if (data.phases) {
         return {
           id: `rm_${Date.now()}`,
@@ -491,7 +497,7 @@ Kembalikan HANYA format JSON berikut:
         };
       }
     } catch (err: any) {
-      dbRepository.logAIAction('CAREER_ROADMAP', Date.now() - startTime, 'error', err?.message || 'Fallback');
+      await logRepository.logAIAction('CAREER_ROADMAP', Date.now() - startTime, 'error', err?.message || 'Fallback');
     }
 
     return {
@@ -578,10 +584,10 @@ Kembalikan HANYA JSON array:
       });
 
       const data = extractCleanJSON(res.text || '[]');
-      dbRepository.logAIAction('INTERVIEW_COACH', Date.now() - startTime, 'success', `Interview questions generated`);
+      await logRepository.logAIAction('INTERVIEW_COACH', Date.now() - startTime, 'success', `Interview questions generated`);
       if (Array.isArray(data) && data.length > 0) return data;
     } catch (err: any) {
-      dbRepository.logAIAction('INTERVIEW_COACH', Date.now() - startTime, 'error', err?.message || 'Fallback');
+      await logRepository.logAIAction('INTERVIEW_COACH', Date.now() - startTime, 'error', err?.message || 'Fallback');
     }
 
     return [
@@ -645,10 +651,10 @@ Kembalikan HANYA JSON:
       });
 
       const data = extractCleanJSON(res.text || '{}');
-      dbRepository.logAIAction('INTERVIEW_EVAL', Date.now() - startTime, 'success', 'Evaluated interview answer');
+      await logRepository.logAIAction('INTERVIEW_EVAL', Date.now() - startTime, 'success', 'Evaluated interview answer');
       if (data.score !== undefined) return data;
     } catch (err: any) {
-      dbRepository.logAIAction('INTERVIEW_EVAL', Date.now() - startTime, 'error', err?.message || 'Fallback');
+      await logRepository.logAIAction('INTERVIEW_EVAL', Date.now() - startTime, 'error', err?.message || 'Fallback');
     }
 
     return {

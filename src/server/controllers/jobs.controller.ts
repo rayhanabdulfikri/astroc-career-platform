@@ -1,37 +1,51 @@
 import { Request, Response, NextFunction } from 'express';
-import { dbRepository } from '../repositories/database.repository';
+import { jobRepository } from '../repositories/job.repository';
+import { userRepository } from '../repositories/user.repository';
+import { cvRepository } from '../repositories/cv.repository';
+import { matchingRepository } from '../repositories/matching.repository';
 import { aiService } from '../services/ai.service';
 import { sendSuccess } from '../utils/response';
 
-export function getJobs(req: Request, res: Response) {
-  const search = (req.query.q as string || '').toLowerCase();
-  let jobs = dbRepository.jobsProcessed;
-  if (search) {
-    jobs = jobs.filter(
-      (j) =>
-        j.title.toLowerCase().includes(search) ||
-        j.company.toLowerCase().includes(search) ||
-        j.requiredSkills.some((s) => s.toLowerCase().includes(search))
-    );
+export async function getJobs(req: Request, res: Response, next: NextFunction) {
+  try {
+    const search = (req.query.q as string || '').toLowerCase();
+    const jobs = await jobRepository.getJobs(search);
+    return sendSuccess(res, { total: jobs.length, jobs });
+  } catch (err) {
+    next(err);
   }
-  return sendSuccess(res, { total: jobs.length, jobs });
 }
 
 export async function searchJobs(req: Request, res: Response, next: NextFunction) {
   try {
-    const activeTarget = dbRepository.targetPositions[0];
-    const activeCV = dbRepository.cvs[0];
+    const activeTarget = (await userRepository.getTargetPosition()) || {
+      id: 'tgt_01',
+      userId: 'usr_01',
+      title: 'Full Stack AI Engineer',
+      industry: 'Technology',
+      expectedSalaryMin: 15000000,
+      expectedSalaryMax: 28000000,
+      currency: 'IDR',
+      location: 'Jakarta / Remote',
+      remotePreference: 'hybrid',
+      experienceLevel: 'junior',
+      updatedAt: new Date().toISOString(),
+    };
+
+    const activeCV = await cvRepository.getActiveCV();
     const cvSkills = activeCV ? activeCV.skills.hardSkills : ['React', 'Node.js', 'Python', 'SQL'];
 
     const freshJobs = await aiService.searchJobsWithSearchGrounding(activeTarget, cvSkills);
-    dbRepository.calculateInitialMatches();
+    await jobRepository.saveJobs(freshJobs);
+
+    const matches = matchingRepository.recalculateMatches(activeCV, freshJobs);
 
     return sendSuccess(res, {
       status: 'success',
       count: freshJobs.length,
       foundCount: freshJobs.length,
       jobs: freshJobs,
-      matches: dbRepository.jobMatches,
+      matches,
     });
   } catch (err) {
     next(err);

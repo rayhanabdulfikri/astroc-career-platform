@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { dbRepository } from '../repositories/database.repository';
+import { logRepository } from '../repositories/log.repository';
 import { jobScheduler } from '../services/scheduler.service';
 import { sendSuccess } from '../utils/response';
 
@@ -21,13 +21,18 @@ export async function triggerScheduler(req: Request, res: Response, next: NextFu
   }
 }
 
-export function getLogs(req: Request, res: Response) {
-  return sendSuccess(res, {
-    logs: dbRepository.aiLogs,
-    scheduler: {
-      isRunning: jobScheduler.isRunning,
-      lastRunTime: jobScheduler.lastRunTime,
-      runCount: jobScheduler.runCount,
-    },
-  });
+export async function getLogs(req: Request, res: Response, next: NextFunction) {
+  try {
+    const logs = await logRepository.getLogs();
+    return sendSuccess(res, {
+      logs,
+      scheduler: {
+        isRunning: jobScheduler.isRunning,
+        lastRunTime: jobScheduler.lastRunTime,
+        runCount: jobScheduler.runCount,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
 }

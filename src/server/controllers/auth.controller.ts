@@ -1,30 +1,27 @@
-import { Request, Response } from 'express';
-import { dbRepository } from '../repositories/database.repository';
+import { Response } from 'express';
+import { AuthenticatedRequest } from '../middleware/auth.middleware';
+import { userRepository } from '../repositories/user.repository';
 import { sendSuccess } from '../utils/response';
 
-export function login(req: Request, res: Response) {
-  const { email } = req.body;
-  let user = dbRepository.users.find((u) => u.email === email);
+export async function login(req: AuthenticatedRequest, res: Response) {
+  const email = req.user?.email || req.body.email || 'user@astroc.ai';
+  let user = await userRepository.findByEmail(email);
   if (!user) {
-    user = {
-      id: `usr_${Date.now()}`,
-      email: email || 'user@astroc.ai',
-      fullName: email ? email.split('@')[0].toUpperCase() : 'Rayhan Abdul',
-      role: 'Job Seeker / AI Enthusiast',
-      avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-    };
-    dbRepository.users.push(user);
+    user = await userRepository.createUser(email);
   }
   return sendSuccess(res, {
     status: 'success',
     user,
-    token: `fb_jwt_token_${Date.now()}`,
   });
 }
 
-export function getMe(req: Request, res: Response) {
-  return sendSuccess(res, {
-    user: dbRepository.users[0],
-    profile: dbRepository.profiles[0],
-  });
+export async function getMe(req: AuthenticatedRequest, res: Response) {
+  const email = req.user?.email;
+  let user = email ? await userRepository.findByEmail(email) : await userRepository.getPrimaryUser();
+  if (!user) {
+    user = await userRepository.getPrimaryUser();
+  }
+
+  const profile = await userRepository.getProfile(user.id);
+  return sendSuccess(res, { user, profile });
 }

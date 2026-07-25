@@ -17,6 +17,7 @@ import { SkillGapView } from './components/dashboard/SkillGapView';
 import { RoadmapView } from './components/dashboard/RoadmapView';
 import { InterviewCoachView } from './components/dashboard/InterviewCoachView';
 import { SystemStatusView } from './components/dashboard/SystemStatusView';
+import { auth, onAuthStateChanged } from './config/firebase';
 import {
   AuthUser,
   ParsedCV,
@@ -35,6 +36,7 @@ export function App() {
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [isDark, setIsDark] = useState<boolean>(true);
   const [user, setUser] = useState<AuthUser | null>(null);
+  const [authToken, setAuthToken] = useState<string | null>(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isTargetModalOpen, setIsTargetModalOpen] = useState(false);
 
@@ -69,6 +71,24 @@ export function App() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
+  // Listen to Firebase Auth state
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
+      if (fbUser) {
+        const token = await fbUser.getIdToken();
+        setAuthToken(token);
+        setUser({
+          uid: fbUser.uid,
+          email: fbUser.email || 'user@astroc.ai',
+          fullName: fbUser.displayName || (fbUser.email ? fbUser.email.split('@')[0].toUpperCase() : 'Rayhan AI Engineer'),
+          avatarUrl: fbUser.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
+          createdAt: new Date().toISOString(),
+        });
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
   // Sync dark class on html document
   useEffect(() => {
     if (isDark) {
@@ -78,18 +98,26 @@ export function App() {
     }
   }, [isDark]);
 
+  const getAuthHeaders = () => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (authToken) {
+      headers['Authorization'] = `Bearer ${authToken}`;
+    }
+    return headers;
+  };
+
   // Initial Data Fetching from Server
   const loadInitialData = async () => {
     try {
       const [dashRes, jobsRes, matchRes, gapRes, roadRes, qRes, notifRes, cvRes] = await Promise.all([
-        fetch('/api/dashboard/overview').then((r) => r.json()),
-        fetch('/api/jobs').then((r) => r.json()),
-        fetch('/api/matching/evaluate').then((r) => r.json()),
-        fetch('/api/skill-gap').then((r) => r.json()),
-        fetch('/api/roadmap').then((r) => r.json()),
-        fetch('/api/interview-questions').then((r) => r.json()),
-        fetch('/api/notifications').then((r) => r.json()),
-        fetch('/api/cv/active').then((r) => r.json()),
+        fetch('/api/dashboard/overview', { headers: getAuthHeaders() }).then((r) => r.json()),
+        fetch('/api/jobs', { headers: getAuthHeaders() }).then((r) => r.json()),
+        fetch('/api/matching/evaluate', { headers: getAuthHeaders() }).then((r) => r.json()),
+        fetch('/api/skill-gap', { headers: getAuthHeaders() }).then((r) => r.json()),
+        fetch('/api/roadmap', { headers: getAuthHeaders() }).then((r) => r.json()),
+        fetch('/api/interview-questions', { headers: getAuthHeaders() }).then((r) => r.json()),
+        fetch('/api/notifications', { headers: getAuthHeaders() }).then((r) => r.json()),
+        fetch('/api/cv/active', { headers: getAuthHeaders() }).then((r) => r.json()),
       ]);
 
       if (dashRes.data) setDashboardData(dashRes.data);
@@ -104,14 +132,15 @@ export function App() {
         setCvAnalysis(cvRes.analysis);
       }
 
-      // Default mock user
-      setUser({
-        uid: 'usr_001',
-        email: 'rayhan.developer@example.com',
-        fullName: 'Rayhan AI Engineer',
-        avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
-        createdAt: new Date().toISOString(),
-      });
+      if (!user) {
+        setUser({
+          uid: 'usr_001',
+          email: 'rayhan.developer@example.com',
+          fullName: 'Rayhan AI Engineer',
+          avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
+          createdAt: new Date().toISOString(),
+        });
+      }
     } catch (err) {
       console.error('Error fetching initial data:', err);
     }
@@ -119,7 +148,7 @@ export function App() {
 
   useEffect(() => {
     loadInitialData();
-  }, []);
+  }, [authToken]);
 
   // Upload CV handler
   const handleUploadCV = async (rawText: string, fileName: string, presetId?: string) => {
@@ -128,7 +157,7 @@ export function App() {
     try {
       const res = await fetch('/api/cv/upload', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ rawText, fileName, presetId }),
       });
       const data = await res.json();
@@ -136,7 +165,6 @@ export function App() {
         setActiveCV(data.parsed);
         setCvAnalysis(data.analysis);
         addToast('success', `CV ${data.parsed.name} berhasil dianalisis dengan ATS Score ${data.analysis.ats.atsScore}%!`);
-        // Refresh dashboard overview
         loadInitialData();
       }
     } catch (err) {
@@ -154,7 +182,7 @@ export function App() {
     try {
       const res = await fetch('/api/jobs/search-grounding', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           query: dashboardData?.targetPosition?.title || 'Full Stack Engineer',
         }),
@@ -162,7 +190,7 @@ export function App() {
       const data = await res.json();
       if (data.jobs) {
         setJobs(data.jobs);
-        addToast('success', `Berhasil menemukan ${data.count} lowongan kerja baru via Search Grounding!`);
+        addToast('success', `Berhasil menemukan ${data.count || data.foundCount} lowongan kerja baru via Search Grounding!`);
         loadInitialData();
       }
     } catch (err) {
@@ -180,6 +208,7 @@ export function App() {
     try {
       const res = await fetch('/api/admin/trigger-scheduler', {
         method: 'POST',
+        headers: getAuthHeaders(),
       });
       const data = await res.json();
       if (data.success) {
@@ -199,7 +228,7 @@ export function App() {
     try {
       const res = await fetch('/api/target-position', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify(updated),
       });
       const data = await res.json();
@@ -217,7 +246,7 @@ export function App() {
     setLoading(true);
     addToast('info', 'Gemini AI membuat ulang Strategic Career Roadmap...');
     try {
-      const res = await fetch('/api/roadmap/generate', { method: 'POST' });
+      const res = await fetch('/api/roadmap/generate', { method: 'POST', headers: getAuthHeaders() });
       const data = await res.json();
       if (data.roadmap) {
         setRoadmap(data.roadmap);
@@ -233,7 +262,7 @@ export function App() {
   // Mark notifications read
   const handleMarkNotifsRead = async () => {
     try {
-      await fetch('/api/notifications/read-all', { method: 'POST' });
+      await fetch('/api/notifications/read-all', { method: 'POST', headers: getAuthHeaders() });
       setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
     } catch (err) {
       console.error(err);
@@ -339,8 +368,9 @@ export function App() {
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
         currentUser={user}
-        onLoginSuccess={(loggedInUser) => {
+        onLoginSuccess={(loggedInUser, token) => {
           setUser(loggedInUser);
+          if (token) setAuthToken(token);
           addToast('success', `Selamat datang kembali, ${loggedInUser.fullName}!`);
         }}
       />
