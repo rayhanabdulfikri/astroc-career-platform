@@ -9,6 +9,10 @@ export class AppError extends Error {
   }
 }
 
+export function notFoundHandler(req: Request, res: Response, next: NextFunction) {
+  sendError(res, `Route non-existent: ${req.method} ${req.originalUrl}`, 404);
+}
+
 export function errorHandler(err: any, req: Request, res: Response, next: NextFunction) {
   console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err.message || err);
   const statusCode = err.statusCode || 500;

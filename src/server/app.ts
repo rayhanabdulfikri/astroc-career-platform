@@ -1,34 +1,69 @@
-import express from 'express';
+import express, { Express } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import apiRouter from './routes';
-import { requestLogger } from './middleware/logging.middleware';
-import { errorHandler } from './middleware/error.middleware';
+import compression from 'compression';
 import { globalRateLimiter } from './middleware/rateLimiter.middleware';
+import { requestLogger } from './middleware/logging.middleware';
+import { errorHandler, notFoundHandler } from './middleware/error.middleware';
+import { setupSwagger } from './config/swagger';
+import apiRouter from './routes/index';
 import { jobScheduler } from './services/scheduler.service';
 
-const app = express();
+export function createApp(): Express {
+  const app = express();
 
-// Security & Body Parser
-app.use(
-  helmet({
-    contentSecurityPolicy: false,
-  })
-);
-app.use(cors());
-app.use(express.json({ limit: '15mb' }));
+  // Security Headers
+  app.use(
+    helmet({
+      contentSecurityPolicy: false,
+    })
+  );
 
-// Request Logging & Rate Limiting
-app.use(requestLogger);
-app.use('/api', globalRateLimiter);
+  // Gzip / Brotli Compression Middleware
+  app.use(compression());
 
-// Initialize Scheduler
-jobScheduler.startScheduler();
+  // CORS Configuration
+  app.use(
+    cors({
+      origin: '*',
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization'],
+    })
+  );
 
-// Mount API Routes
-app.use('/api', apiRouter);
+  // Body Parsers & Cache Control
+  app.use(express.json({ limit: '10mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Centralized Error Handling
-app.use(errorHandler);
+  // HTTP Cache Control Header Middleware
+  app.use((req, res, next) => {
+    if (req.method === 'GET' && !req.path.startsWith('/api/')) {
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    } else {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    }
+    next();
+  });
 
-export default app;
+  // Logging & Global Rate Limiting
+  app.use(requestLogger);
+  app.use(globalRateLimiter);
+
+  // OpenAPI Swagger Documentation
+  setupSwagger(app);
+
+  // API Routes
+  app.use('/api', apiRouter);
+  app.use('/', apiRouter);
+
+  // 404 & Global Error Handling
+  app.use(notFoundHandler);
+  app.use(errorHandler);
+
+  // Initialize Background Scheduler
+  jobScheduler.startScheduler();
+
+  return app;
+}
+
+export default createApp();

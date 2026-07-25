@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - '3000:3000'
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    depends_on:
+      - postgres
+
+  postgres:
+    image: ankane/pgvector:v0.5.1
+    ports:
+      - '5432:5432'
+    environment:
+      - POSTGRES_DB=astroc_db
+      - POSTGRES_USER=astroc_user
+      - POSTGRES_PASSWORD=astroc_password
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./supabase/migrations/20260725_init_schema.sql:/docker-entrypoint-initdb.d/init.sql
+
+volumes:
+  pgdata:
