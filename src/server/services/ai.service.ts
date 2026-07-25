@@ -78,6 +78,23 @@ function extractCleanJSON(text: string): any {
 }
 
 export class AIService {
+  // Cosine Similarity Utility
+  public cosineSimilarity(vecA: number[], vecB: number[]): number {
+    if (!vecA || !vecB || vecA.length === 0 || vecB.length === 0 || vecA.length !== vecB.length) {
+      return 0.75;
+    }
+    let dotProduct = 0;
+    let normA = 0;
+    let normB = 0;
+    for (let i = 0; i < vecA.length; i++) {
+      dotProduct += vecA[i] * vecB[i];
+      normA += vecA[i] * vecA[i];
+      normB += vecB[i] * vecB[i];
+    }
+    if (normA === 0 || normB === 0) return 0.75;
+    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+  }
+
   // Generate 768-dim Vector Embeddings for pgvector
   public async generateEmbedding(text: string): Promise<number[]> {
     try {
@@ -91,6 +108,11 @@ export class AIService {
       console.warn('Embedding generation note (fallback vector used):', err.message);
       return new Array(768).fill(0);
     }
+  }
+
+  public async generateCVEmbedding(cv: ParsedCV): Promise<number[]> {
+    const text = `${cv.name} ${cv.summary} ${cv.skills?.hardSkills?.join(' ')} ${cv.experience?.map((e) => e.title + ' ' + e.company).join(' ')}`;
+    return this.generateEmbedding(text);
   }
 
   // 1. CV PARSER with responseSchema
