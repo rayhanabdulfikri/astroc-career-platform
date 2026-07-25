@@ -248,17 +248,25 @@ export class AIService {
       const latency = Date.now() - startTime;
       await logRepository.logAIAction('CV_PARSER', latency, 'success', `Parsed CV: ${fileName}`);
 
+      const cleanSummary = (parsedData.summary && !parsedData.summary.includes('%PDF'))
+        ? parsedData.summary
+        : (sanitizedText.includes('%PDF') || sanitizedText.includes('/Type'))
+          ? `Dokumen CV diunggah: ${fileName}. Profil Professional Kandidat.`
+          : sanitizedText.slice(0, 300);
+
       return {
         id: `cv_${Date.now()}`,
         fileName,
         uploadedAt: new Date().toISOString(),
-        name: parsedData.name || 'Kandidat ASTROC',
+        name: (parsedData.name && !parsedData.name.includes('%PDF') && !parsedData.name.includes('/Type'))
+          ? parsedData.name
+          : fileName.replace(/\.pdf$/i, '').replace(/[-_]/g, ' '),
         email: parsedData.email || 'user@example.com',
         phone: parsedData.phone || '-',
         linkedin: parsedData.linkedin || '-',
         github: parsedData.github || '-',
         portfolio: parsedData.portfolio || '-',
-        summary: parsedData.summary || sanitizedText.slice(0, 300),
+        summary: cleanSummary,
         education: parsedData.education || [],
         experience: parsedData.experience || [],
         organization: parsedData.organization || [],
@@ -278,13 +286,15 @@ export class AIService {
         id: `cv_${Date.now()}`,
         fileName,
         uploadedAt: new Date().toISOString(),
-        name: 'Kandidat ASTROC',
+        name: fileName.replace(/\.pdf$/i, '').replace(/[-_]/g, ' ') || 'Kandidat ASTROC',
         email: 'user@example.com',
         phone: '-',
         linkedin: '-',
         github: '-',
         portfolio: '-',
-        summary: sanitizedText.slice(0, 300),
+        summary: (sanitizedText.includes('%PDF') || sanitizedText.includes('/Type'))
+          ? `Dokumen CV diunggah: ${fileName}. Profil Professional Kandidat.`
+          : sanitizedText.slice(0, 300),
         education: [],
         experience: [],
         organization: [],
