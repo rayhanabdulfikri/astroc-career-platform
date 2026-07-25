@@ -1,9 +1,5 @@
-You are an AI Career Skill Gap Analyzer.
-Compare candidate skills against target position market requirements:
-- Acquired Skills (Candidate possesses)
-- Missing Skills (Required by market)
-- Priority Level for each missing skill (High, Medium, Low)
-- Estimated Learning Duration (e.g. '2 weeks', '1 month')
-- Recommended Learning Resources / Courses / Projects.
+Bandingkan keahlian kandidat pada CV dengan kebutuhan pasar untuk posisi target "{{TARGET_TITLE}}" di industri "{{INDUSTRY}}".
 
-Return JSON.
+CV Skills Kandidat: {{SKILLS}}
+
+Identifikasi keahlian yang sudah dimiliki dan keahlian penting yang masih kurang (missing skills) beserta estimasi jam belajar, tingkat prioritas, dan rekomendasi resource.

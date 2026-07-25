@@ -1,4 +1,5 @@
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, Type } from '@google/genai';
+import { loadPrompt } from '../utils/promptLoader';
 import { logRepository } from '../repositories/log.repository';
 import { cvRepository } from '../repositories/cv.repository';
 import { jobRepository } from '../repositories/job.repository';
@@ -29,6 +30,38 @@ function getAIClient(): GoogleGenAI {
   return genAIClient;
 }
 
+// Exponential Backoff Retry Utility for HTTP 429 & Timeouts
+async function callWithRetry<T>(
+  actionName: string,
+  fn: () => Promise<T>,
+  maxRetries = 3,
+  initialDelayMs = 1000
+): Promise<T> {
+  let attempt = 0;
+  let delay = initialDelayMs;
+
+  while (attempt < maxRetries) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      attempt++;
+      const isRateLimit = err?.status === 429 || err?.message?.includes('429') || err?.message?.includes('RESOURCE_EXHAUSTED');
+      const isTimeout = err?.code === 'ETIMEDOUT' || err?.message?.includes('timeout');
+
+      if ((isRateLimit || isTimeout) && attempt < maxRetries) {
+        console.warn(`⚠️ [Gemini AI ${actionName}] Attempt ${attempt} failed (${err?.message || 'Error'}). Retrying in ${delay}ms...`);
+        await new Promise((res) => setTimeout(res, delay));
+        delay *= 2; // Exponential backoff (1s, 2s, 4s)
+      } else {
+        console.error(`❌ [Gemini AI ${actionName}] Fatal error on attempt ${attempt}:`, err?.message || err);
+        throw err;
+      }
+    }
+  }
+
+  throw new Error(`Max retries reached for Gemini AI action: ${actionName}`);
+}
+
 function extractCleanJSON(text: string): any {
   try {
     const cleaned = text.replace(/```json/gi, '').replace(/```/g, '').trim();
@@ -45,53 +78,112 @@ function extractCleanJSON(text: string): any {
 }
 
 export class AIService {
+  // 1. CV PARSER with responseSchema
   public async parseCV(rawCvText: string, fileName: string): Promise<ParsedCV> {
     const startTime = Date.now();
-    const ai = getAIClient();
+    const sanitizedText = rawCvText.slice(0, 15000); // Optimize token usage
 
-    const prompt = `Bertindaklah sebagai AI Resume / CV Parser profesional.
-Ekstrak seluruh informasi dari teks CV berikut dan kembalikan HANYA format JSON valid tanpa teks tambahan.
+    const prompt = loadPrompt('cv_parser.txt', {
+      RAW_CV: sanitizedText,
+    });
 
-Target Schema JSON:
-{
-  "name": string,
-  "email": string,
-  "phone": string,
-  "linkedin": string,
-  "github": string,
-  "portfolio": string,
-  "summary": string,
-  "education": [
-    { "institution": string, "degree": string, "fieldOfStudy": string, "startYear": string, "endYear": string, "gpa": string }
-  ],
-  "experience": [
-    { "company": string, "title": string, "location": string, "startDate": string, "endDate": string, "description": [string], "techStack": [string] }
-  ],
-  "organization": [
-    { "name": string, "role": string, "period": string, "description": string }
-  ],
-  "projects": [
-    { "title": string, "description": string, "link": string, "techStack": [string] }
-  ],
-  "achievements": [string],
-  "certificates": [
-    { "name": string, "issuer": string, "year": string }
-  ],
-  "skills": {
-    "hardSkills": [string],
-    "softSkills": [string],
-    "languages": [string]
-  }
-}
-
-Teks CV untuk Diparse:
-${rawCvText}`;
+    const cvSchema = {
+      type: Type.OBJECT,
+      properties: {
+        name: { type: Type.STRING },
+        email: { type: Type.STRING },
+        phone: { type: Type.STRING },
+        linkedin: { type: Type.STRING },
+        github: { type: Type.STRING },
+        portfolio: { type: Type.STRING },
+        summary: { type: Type.STRING },
+        education: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              institution: { type: Type.STRING },
+              degree: { type: Type.STRING },
+              fieldOfStudy: { type: Type.STRING },
+              startYear: { type: Type.STRING },
+              endYear: { type: Type.STRING },
+              gpa: { type: Type.STRING },
+            },
+          },
+        },
+        experience: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              company: { type: Type.STRING },
+              title: { type: Type.STRING },
+              location: { type: Type.STRING },
+              startDate: { type: Type.STRING },
+              endDate: { type: Type.STRING },
+              description: { type: Type.ARRAY, items: { type: Type.STRING } },
+              techStack: { type: Type.ARRAY, items: { type: Type.STRING } },
+            },
+          },
+        },
+        organization: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              name: { type: Type.STRING },
+              role: { type: Type.STRING },
+              period: { type: Type.STRING },
+              description: { type: Type.STRING },
+            },
+          },
+        },
+        projects: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              title: { type: Type.STRING },
+              description: { type: Type.STRING },
+              link: { type: Type.STRING },
+              techStack: { type: Type.ARRAY, items: { type: Type.STRING } },
+            },
+          },
+        },
+        achievements: { type: Type.ARRAY, items: { type: Type.STRING } },
+        certificates: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              name: { type: Type.STRING },
+              issuer: { type: Type.STRING },
+              year: { type: Type.STRING },
+            },
+          },
+        },
+        skills: {
+          type: Type.OBJECT,
+          properties: {
+            hardSkills: { type: Type.ARRAY, items: { type: Type.STRING } },
+            softSkills: { type: Type.ARRAY, items: { type: Type.STRING } },
+            languages: { type: Type.ARRAY, items: { type: Type.STRING } },
+          },
+        },
+      },
+    };
 
     try {
-      const res = await ai.models.generateContent({
-        model: 'gemini-3.6-flash',
-        contents: prompt,
-        config: { responseMimeType: 'application/json' },
+      const res = await callWithRetry('CV_PARSER', async () => {
+        const ai = getAIClient();
+        return await ai.models.generateContent({
+          model: 'gemini-3.6-flash',
+          contents: prompt,
+          config: {
+            responseMimeType: 'application/json',
+            responseSchema: cvSchema,
+          },
+        });
       });
 
       const parsedData = extractCleanJSON(res.text || '{}');
@@ -108,7 +200,7 @@ ${rawCvText}`;
         linkedin: parsedData.linkedin || '-',
         github: parsedData.github || '-',
         portfolio: parsedData.portfolio || '-',
-        summary: parsedData.summary || 'Kandidat berbakat dengan fokus pengembangan karir.',
+        summary: parsedData.summary || sanitizedText.slice(0, 300),
         education: parsedData.education || [],
         experience: parsedData.experience || [],
         organization: parsedData.organization || [],
@@ -120,10 +212,9 @@ ${rawCvText}`;
           softSkills: parsedData.skills?.softSkills || ['Problem Solving', 'Communication', 'Teamwork'],
           languages: parsedData.skills?.languages || ['Indonesia', 'English'],
         },
-        rawText: rawCvText,
+        rawText: sanitizedText,
       };
     } catch (err: any) {
-      console.error('CV Parsing error:', err);
       await logRepository.logAIAction('CV_PARSER', Date.now() - startTime, 'error', err?.message || 'Error');
       return {
         id: `cv_${Date.now()}`,
@@ -135,94 +226,91 @@ ${rawCvText}`;
         linkedin: '-',
         github: '-',
         portfolio: '-',
-        summary: rawCvText.slice(0, 300),
-        education: [
-          {
-            institution: 'Universitas Indonesia',
-            degree: 'Sarjana Komputer',
-            fieldOfStudy: 'Teknik Informatika',
-            startYear: '2020',
-            endYear: '2024',
-          },
-        ],
-        experience: [
-          {
-            company: 'Tech Company',
-            title: 'Software Developer',
-            startDate: '2022',
-            endDate: 'Present',
-            description: ['Mengembangkan aplikasi web modern'],
-            techStack: ['React', 'TypeScript', 'Node.js'],
-          },
-        ],
+        summary: sanitizedText.slice(0, 300),
+        education: [],
+        experience: [],
         organization: [],
         projects: [],
         achievements: [],
         certificates: [],
         skills: {
-          hardSkills: ['React', 'TypeScript', 'Python', 'PostgreSQL', 'Tailwind CSS', 'Docker'],
-          softSkills: ['Problem Solving', 'Critical Thinking', 'Teamwork'],
-          languages: ['Indonesia (Native)', 'English (Fluent)'],
+          hardSkills: ['React', 'TypeScript', 'Python', 'PostgreSQL', 'Tailwind CSS'],
+          softSkills: ['Problem Solving', 'Critical Thinking'],
+          languages: ['Indonesia', 'English'],
         },
-        rawText: rawCvText,
+        rawText: sanitizedText,
       };
     }
   }
 
+  // 2. ATS & HR PIPELINE with responseSchema
   public async analyzeCVFullPipeline(cv: ParsedCV): Promise<CVAnalysisResult> {
     const startTime = Date.now();
-    const ai = getAIClient();
 
-    const prompt = `Anda adalah sistem gabungan:
-1. ATS (Applicant Tracking System) Evaluator
-2. HR Manager Senior dengan Pengalaman Lebih dari 20 Tahun di Perusahaan Tech Global & Multinational
+    const atsPrompt = loadPrompt('ats_evaluator.txt', {
+      NAME: cv.name,
+      SUMMARY: cv.summary,
+      EDUCATION: JSON.stringify(cv.education),
+      EXPERIENCE: JSON.stringify(cv.experience),
+      SKILLS: JSON.stringify(cv.skills),
+    });
 
-Tugas Anda: Evaluasi CV kandidat berikut secara mendalam, obyektif, jujur, dan berikan rekomendasi rewrite serta strategi peningkatan karir.
+    const hrPrompt = loadPrompt('hr_reviewer.txt', {
+      NAME: cv.name,
+      SUMMARY: cv.summary,
+      EXPERIENCE: JSON.stringify(cv.experience),
+      PROJECTS: JSON.stringify(cv.projects),
+      ACHIEVEMENTS: JSON.stringify(cv.achievements),
+    });
 
-Kandidat:
-Nama: ${cv.name}
-Summary: ${cv.summary}
-Pendidikan: ${JSON.stringify(cv.education)}
-Pengalaman Kerja: ${JSON.stringify(cv.experience)}
-Projects: ${JSON.stringify(cv.projects)}
-Skills: ${JSON.stringify(cv.skills)}
-Achievements: ${JSON.stringify(cv.achievements)}
+    const combinedPrompt = `${atsPrompt}\n\n${hrPrompt}`;
 
-Kembalikan HANYA format JSON valid berikut:
-{
-  "atsScore": number (0-100),
-  "keywordMatchPercentage": number (0-100),
-  "grammarScore": number (0-100),
-  "formattingScore": number (0-100),
-  "readabilityScore": number (0-100),
-  "completenessPercentage": number (0-100),
-  "missingKeywords": [string],
-  "formattingIssues": [string],
-  "improvementTips": [string],
-
-  "hrScore": number (0-100),
-  "strengths": [string],
-  "weaknesses": [string],
-  "professionalismFeedback": string,
-  "impactScore": number (0-100),
-  "leadershipSignals": [string],
-  "communicationSignals": [string],
-  "rewriteSuggestions": [
-    {
-      "original": string,
-      "suggested": string,
-      "reason": string
-    }
-  ],
-  "overallHRVerdict": string,
-  "overallCareerScore": number (0-100)
-}`;
+    const analysisSchema = {
+      type: Type.OBJECT,
+      properties: {
+        atsScore: { type: Type.INTEGER },
+        keywordMatchPercentage: { type: Type.INTEGER },
+        grammarScore: { type: Type.INTEGER },
+        formattingScore: { type: Type.INTEGER },
+        readabilityScore: { type: Type.INTEGER },
+        completenessPercentage: { type: Type.INTEGER },
+        missingKeywords: { type: Type.ARRAY, items: { type: Type.STRING } },
+        formattingIssues: { type: Type.ARRAY, items: { type: Type.STRING } },
+        improvementTips: { type: Type.ARRAY, items: { type: Type.STRING } },
+        hrScore: { type: Type.INTEGER },
+        strengths: { type: Type.ARRAY, items: { type: Type.STRING } },
+        weaknesses: { type: Type.ARRAY, items: { type: Type.STRING } },
+        professionalismFeedback: { type: Type.STRING },
+        impactScore: { type: Type.INTEGER },
+        leadershipSignals: { type: Type.ARRAY, items: { type: Type.STRING } },
+        communicationSignals: { type: Type.ARRAY, items: { type: Type.STRING } },
+        rewriteSuggestions: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              original: { type: Type.STRING },
+              suggested: { type: Type.STRING },
+              reason: { type: Type.STRING },
+            },
+          },
+        },
+        overallHRVerdict: { type: Type.STRING },
+        overallCareerScore: { type: Type.INTEGER },
+      },
+    };
 
     try {
-      const res = await ai.models.generateContent({
-        model: 'gemini-3.6-flash',
-        contents: prompt,
-        config: { responseMimeType: 'application/json' },
+      const res = await callWithRetry('CV_EVALUATION', async () => {
+        const ai = getAIClient();
+        return await ai.models.generateContent({
+          model: 'gemini-3.6-flash',
+          contents: combinedPrompt,
+          config: {
+            responseMimeType: 'application/json',
+            responseSchema: analysisSchema,
+          },
+        });
       });
 
       const data = extractCleanJSON(res.text || '{}');
@@ -240,39 +328,24 @@ Kembalikan HANYA format JSON valid berikut:
           formattingScore: data.formattingScore || 94,
           readabilityScore: data.readabilityScore || 90,
           completenessPercentage: data.completenessPercentage || 96,
-          missingKeywords: data.missingKeywords || ['System Architecture', 'CI/CD Pipelines', 'Automated Testing'],
+          missingKeywords: data.missingKeywords || ['System Architecture', 'CI/CD Pipelines'],
           formattingIssues: data.formattingIssues || [],
-          improvementTips: data.improvementTips || [
-            'Gunakan angka terukur pada achievement (misal % peningkatkan performa).',
-            'Sertakan kata kunci standar industri untuk posisi target.',
-          ],
+          improvementTips: data.improvementTips || ['Gunakan angka terukur pada pencapaian.', 'Sertakan kata kunci industri.'],
         },
         hr: {
           hrScore: data.hrScore || 88,
-          strengths: data.strengths || [
-            'Latar belakang pendidikan yang solid.',
-            'Pengalaman teknis yang relevan dengan tren industri.',
-          ],
-          weaknesses: data.weaknesses || [
-            'Perlu memperjelas skala proyek dan dampak bisnis yang dihasilkan.',
-          ],
-          professionalismFeedback: data.professionalismFeedback || 'Struktur CV sangat rapi dan menunjukkan profesionalisme yang baik.',
+          strengths: data.strengths || ['Latar belakang pendidikan solid', 'Pengalaman teknis relevan'],
+          weaknesses: data.weaknesses || ['Perlu memperjelas skala dampak bisnis.'],
+          professionalismFeedback: data.professionalismFeedback || 'Struktur CV sangat rapi.',
           impactScore: data.impactScore || 90,
-          leadershipSignals: data.leadershipSignals || ['Inisiatif proyek mandiri', 'Mentoring tim'],
-          communicationSignals: data.communicationSignals || ['Bahasa Inggris aktif', 'Kemampuan dokumentasi'],
-          rewriteSuggestions: data.rewriteSuggestions || [
-            {
-              original: 'Bertanggung jawab mengembangkan aplikasi web.',
-              suggested: 'Merancang dan meluncurkan 3 aplikasi web utama yang meningkatkan efisiensi operasional sebesar 35%.',
-              reason: 'Menambahkan konteks pencapaian terukur.',
-            },
-          ],
-          overallHRVerdict: data.overallHRVerdict || 'Kandidat memiliki potensi tinggi untuk lolos ke tahap interview.',
+          leadershipSignals: data.leadershipSignals || ['Inisiatif proyek mandiri'],
+          communicationSignals: data.communicationSignals || ['Bahasa Inggris aktif'],
+          rewriteSuggestions: data.rewriteSuggestions || [],
+          overallHRVerdict: data.overallHRVerdict || 'Kandidat berkualitas tinggi.',
         },
         analyzedAt: new Date().toISOString(),
       };
     } catch (err: any) {
-      console.error('CV Analysis error:', err);
       await logRepository.logAIAction('CV_EVALUATION', Date.now() - startTime, 'error', err?.message || 'Error');
       const latest = await cvRepository.getLatestAnalysis();
       return latest || {
@@ -286,68 +359,48 @@ Kembalikan HANYA format JSON valid berikut:
     }
   }
 
+  // 3. JOB SEARCH GROUNDING
   public async searchJobsWithSearchGrounding(
     targetPos: TargetPosition,
     cvSkills: string[]
   ): Promise<JobProcessed[]> {
     const startTime = Date.now();
-    const ai = getAIClient();
-
-    const searchQuery = `Lowongan kerja terbaru ${targetPos.title} ${targetPos.location} ${targetPos.industry} 2026 Indonesia remote hybrid fulltime`;
-
-    const prompt = `Anda adalah AI Job Discovery Platform ASTROC.
-Cari lowongan kerja TERBARU dan REAL untuk posisi "${targetPos.title}" di lokasi "${targetPos.location}" dengan keahlian utama: ${cvSkills.slice(0, 8).join(', ')}.
-
-Gunakan Google Search Grounding untuk mengambil data lowongan nyata dari situs karir terkemuka (Glints, JobStreet, LinkedIn Indonesia, Kalibrr, KitaLulus, Karir.com, website resmi perusahaan).
-
-Sajikan minimal 4 lowongan terbaik dalam format JSON array yang sudah dinormalisasi dan bersih.
-
-Schema JSON Array:
-[
-  {
-    "company": string,
-    "title": string,
-    "location": string,
-    "salaryRange": string,
-    "employmentType": string ("Full-time", "Contract", "Remote", "Internship"),
-    "experienceLevel": string,
-    "summary": string,
-    "responsibilities": [string],
-    "requirements": [string],
-    "requiredSkills": [string],
-    "sourceUrl": string,
-    "postedDate": string
-  }
-]`;
+    const prompt = loadPrompt('job_finder.txt', {
+      TARGET_TITLE: targetPos.title,
+      LOCATION: targetPos.location,
+      SKILLS: cvSkills.slice(0, 6).join(', '),
+    });
 
     try {
-      const res = await ai.models.generateContent({
-        model: 'gemini-3.6-flash',
-        contents: prompt,
-        config: {
-          tools: [{ googleSearch: {} }],
-        },
+      const res = await callWithRetry('JOB_SEARCH_GROUNDING', async () => {
+        const ai = getAIClient();
+        return await ai.models.generateContent({
+          model: 'gemini-3.6-flash',
+          contents: prompt,
+          config: {
+            tools: [{ googleSearch: {} }],
+          },
+        });
       });
 
       const parsedJobs = extractCleanJSON(res.text || '[]');
       const latency = Date.now() - startTime;
-      await logRepository.logAIAction('JOB_SEARCH_GROUNDING', latency, 'success', `Found jobs via Search Grounding for ${targetPos.title}`);
+      await logRepository.logAIAction('JOB_SEARCH_GROUNDING', latency, 'success', `Found jobs via Grounding for ${targetPos.title}`);
 
       if (Array.isArray(parsedJobs) && parsedJobs.length > 0) {
-        const existingJobs = await jobRepository.getJobs();
         const normalizedJobs: JobProcessed[] = parsedJobs.map((j: any, idx: number) => ({
           id: `job_grounding_${Date.now()}_${idx}`,
           title: j.title || targetPos.title,
           company: j.company || 'Tech Enterprise',
           location: j.location || targetPos.location,
-          salaryRange: j.salaryRange || 'Rp 15,000,000 - Rp 25,000,000 / bulan',
+          salaryRange: j.salaryRange || 'Rp 15,000,000 - Rp 28,000,000 / bulan',
           employmentType: j.employmentType || 'Full-time',
           experienceLevel: j.experienceLevel || targetPos.experienceLevel,
           summary: j.summary || `Lowongan ${j.title || targetPos.title} di ${j.company || 'Perusahaan Tech'}.`,
-          responsibilities: j.responsibilities || ['Mengembangkan fitur software utama', 'Berkolaborasi dengan tim lintas divisi'],
-          requirements: j.requirements || ['Pengalaman di bidang terkait', 'Keahlian dalam stack teknologi modern'],
+          responsibilities: j.responsibilities || ['Mengembangkan fitur software utama'],
+          requirements: j.requirements || ['Pengalaman di bidang terkait'],
           requiredSkills: j.requiredSkills || cvSkills.slice(0, 6),
-          sourceUrl: j.sourceUrl || 'https://www.google.com/search?q=' + encodeURIComponent(searchQuery),
+          sourceUrl: j.sourceUrl || 'https://www.google.com/search?q=' + encodeURIComponent(targetPos.title),
           postedDate: j.postedDate || 'Baru diterbitkan',
           isActive: true,
         }));
@@ -356,51 +409,63 @@ Schema JSON Array:
         return normalizedJobs;
       }
     } catch (err: any) {
-      console.error('Job Grounding Error:', err);
-      await logRepository.logAIAction('JOB_SEARCH_GROUNDING', Date.now() - startTime, 'error', err?.message || 'Error fallback');
+      await logRepository.logAIAction('JOB_SEARCH_GROUNDING', Date.now() - startTime, 'error', err?.message || 'Fallback');
     }
 
     return jobRepository.getJobs();
   }
 
+  // 4. SKILL GAP ANALYZER with responseSchema
   public async analyzeSkillGapAI(cv: ParsedCV, targetPos: TargetPosition): Promise<SkillGapAnalysis> {
     const startTime = Date.now();
-    const ai = getAIClient();
+    const prompt = loadPrompt('skill_gap.txt', {
+      TARGET_TITLE: targetPos.title,
+      INDUSTRY: targetPos.industry,
+      SKILLS: JSON.stringify(cv.skills),
+    });
 
-    const prompt = `Bandingkan skill kandidat pada CV dengan kebutuhan pasar untuk posisi target "${targetPos.title}" di industri "${targetPos.industry}".
-
-CV Skill Kandidat: ${JSON.stringify(cv.skills)}
-
-Kembalikan HANYA format JSON berikut:
-{
-  "targetPosition": "${targetPos.title}",
-  "totalRequiredSkills": number,
-  "acquiredCount": number,
-  "missingCount": number,
-  "gapScore": number (0-100 kesiapan),
-  "acquiredSkills": [string],
-  "missingSkills": [
-    {
-      "skill": string,
-      "category": "hard" | "soft" | "domain",
-      "isAcquired": false,
-      "priority": "High" | "Medium" | "Low",
-      "estimatedLearningHours": number,
-      "estimatedTimeFrame": string,
-      "recommendedResource": string
-    }
-  ]
-}`;
+    const gapSchema = {
+      type: Type.OBJECT,
+      properties: {
+        targetPosition: { type: Type.STRING },
+        totalRequiredSkills: { type: Type.INTEGER },
+        acquiredCount: { type: Type.INTEGER },
+        missingCount: { type: Type.INTEGER },
+        gapScore: { type: Type.INTEGER },
+        acquiredSkills: { type: Type.ARRAY, items: { type: Type.STRING } },
+        missingSkills: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              skill: { type: Type.STRING },
+              category: { type: Type.STRING },
+              isAcquired: { type: Type.BOOLEAN },
+              priority: { type: Type.STRING },
+              estimatedLearningHours: { type: Type.INTEGER },
+              estimatedTimeFrame: { type: Type.STRING },
+              recommendedResource: { type: Type.STRING },
+            },
+          },
+        },
+      },
+    };
 
     try {
-      const res = await ai.models.generateContent({
-        model: 'gemini-3.6-flash',
-        contents: prompt,
-        config: { responseMimeType: 'application/json' },
+      const res = await callWithRetry('SKILL_GAP', async () => {
+        const ai = getAIClient();
+        return await ai.models.generateContent({
+          model: 'gemini-3.6-flash',
+          contents: prompt,
+          config: {
+            responseMimeType: 'application/json',
+            responseSchema: gapSchema,
+          },
+        });
       });
 
       const data = extractCleanJSON(res.text || '{}');
-      await logRepository.logAIAction('SKILL_GAP', Date.now() - startTime, 'success', `Skill gap generated for ${targetPos.title}`);
+      await logRepository.logAIAction('SKILL_GAP', Date.now() - startTime, 'success', `Skill gap for ${targetPos.title}`);
       if (data.targetPosition) return data;
     } catch (err: any) {
       await logRepository.logAIAction('SKILL_GAP', Date.now() - startTime, 'error', err?.message || 'Fallback');
@@ -423,68 +488,62 @@ Kembalikan HANYA format JSON berikut:
           estimatedTimeFrame: '2 minggu',
           recommendedResource: 'CNCF Certified Kubernetes Administrator (CKA) Course',
         },
-        {
-          skill: 'GraphQL API Architecture',
-          category: 'hard',
-          isAcquired: false,
-          priority: 'Medium',
-          estimatedLearningHours: 12,
-          estimatedTimeFrame: '1 minggu',
-          recommendedResource: 'Apollo GraphQL Production Masterclass',
-        },
-        {
-          skill: 'Advanced System Design & Microservices',
-          category: 'domain',
-          isAcquired: false,
-          priority: 'High',
-          estimatedLearningHours: 35,
-          estimatedTimeFrame: '3 minggu',
-          recommendedResource: 'Designing Data-Intensive Applications (Kleppmann)',
-        },
       ],
     };
   }
 
+  // 5. CAREER ROADMAP GENERATOR with responseSchema
   public async generateCareerRoadmapAI(
     cv: ParsedCV,
     targetPos: TargetPosition,
     overallScore: number
   ): Promise<CareerRoadmap> {
     const startTime = Date.now();
-    const ai = getAIClient();
+    const prompt = loadPrompt('career_roadmap.txt', {
+      NAME: cv.name,
+      TARGET_TITLE: targetPos.title,
+      CURRENT_SCORE: overallScore.toString(),
+      SKILLS: cv.skills.hardSkills.join(', '),
+    });
 
-    const prompt = `Buatlah Roadmap Karir Strategis terstruktur untuk kandidat ${cv.name} menuju posisi target "${targetPos.title}".
-
-Status Kandidat:
-- Score Karir Saat Ini: ${overallScore}%
-- Keahlian Utama: ${cv.skills.hardSkills.join(', ')}
-
-Kembalikan HANYA format JSON berikut:
-{
-  "targetPosition": "${targetPos.title}",
-  "estimatedMonthsToTarget": number,
-  "phases": [
-    {
-      "phaseTitle": string (misal: "Tahap 1: Penguatan Core & Portofolio (Bulan 1-2)"),
-      "duration": string,
-      "targetRole": string,
-      "learningPath": [string],
-      "certifications": [string],
-      "recommendedProjects": [string],
-      "keyMilestones": [string]
-    }
-  ]
-}`;
+    const roadmapSchema = {
+      type: Type.OBJECT,
+      properties: {
+        targetPosition: { type: Type.STRING },
+        estimatedMonthsToTarget: { type: Type.INTEGER },
+        phases: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              phaseTitle: { type: Type.STRING },
+              duration: { type: Type.STRING },
+              targetRole: { type: Type.STRING },
+              learningPath: { type: Type.ARRAY, items: { type: Type.STRING } },
+              certifications: { type: Type.ARRAY, items: { type: Type.STRING } },
+              recommendedProjects: { type: Type.ARRAY, items: { type: Type.STRING } },
+              keyMilestones: { type: Type.ARRAY, items: { type: Type.STRING } },
+            },
+          },
+        },
+      },
+    };
 
     try {
-      const res = await ai.models.generateContent({
-        model: 'gemini-3.6-flash',
-        contents: prompt,
-        config: { responseMimeType: 'application/json' },
+      const res = await callWithRetry('CAREER_ROADMAP', async () => {
+        const ai = getAIClient();
+        return await ai.models.generateContent({
+          model: 'gemini-3.6-flash',
+          contents: prompt,
+          config: {
+            responseMimeType: 'application/json',
+            responseSchema: roadmapSchema,
+          },
+        });
       });
 
       const data = extractCleanJSON(res.text || '{}');
-      await logRepository.logAIAction('CAREER_ROADMAP', Date.now() - startTime, 'success', `Roadmap generated for ${targetPos.title}`);
+      await logRepository.logAIAction('CAREER_ROADMAP', Date.now() - startTime, 'success', `Roadmap for ${targetPos.title}`);
       if (data.phases) {
         return {
           id: `rm_${Date.now()}`,
@@ -512,75 +571,52 @@ Kembalikan HANYA format JSON berikut:
           phaseTitle: 'Fase 1: Akselerasi & Penguatan AI Integration (Bulan 1 - 2)',
           duration: '2 Bulan',
           targetRole: 'Junior - Mid AI Full Stack Engineer',
-          learningPath: [
-            'Pendalaman Google Gemini API & Vector Search with pgvector',
-            'Tuning Performa Query Database PostgreSQL & Caching Redis',
-            'Arsitektur Asynchronous Microservices dengan FastAPI & Node.js',
-          ],
-          certifications: ['Google Cloud Associate Cloud Engineer', 'TensorFlow / Generative AI Fundamentals'],
-          recommendedProjects: [
-            'Membangun RAG AI Search Engine dengan Vector Embeddings & Grounding',
-            'Sistem Notifikasi Real-time Berkecepatan Tinggi berbasis WebSockets',
-          ],
-          keyMilestones: [
-            'Meluncurkan 2 proyek portofolio open-source berkualitas tinggi',
-            'Mencapai skor ATS 95%+ dan menyempurnakan profil LinkedIn/GitHub',
-          ],
-        },
-        {
-          phaseTitle: 'Fase 2: Promosi & Penetrasi Posisi Target (Bulan 3 - 6)',
-          duration: '4 Bulan',
-          targetRole: targetPos.title,
-          learningPath: [
-            'Mastery System Design for High-Throughput Distributed Applications',
-            'Leadership, Technical Code Review, dan Mentoring Software Engineering',
-          ],
-          certifications: ['AWS Certified Solutions Architect / GCP Professional Cloud Architect'],
-          recommendedProjects: [
-            'Enterprise Grade Microservices Platform dengan CI/CD Automated Pipelines',
-          ],
-          keyMilestones: [
-            'Melakukan minimal 10 aplikasi pekerjaan terarah dengan Match Score > 85%',
-            'Lolos ke tahap wawancara akhir dan menerima tawaran gaji sesuai ekspektasi (Rp 18-28 Juta/bulan)',
-          ],
+          learningPath: ['Pendalaman Google Gemini API & Vector Search with pgvector'],
+          certifications: ['Google Cloud Associate Cloud Engineer'],
+          recommendedProjects: ['RAG AI Search Engine dengan Vector Embeddings'],
+          keyMilestones: ['Mencapai skor ATS 95%+ dan menyempurnakan profil'],
         },
       ],
     };
   }
 
+  // 6. EXECUTIVE INTERVIEW COACH with responseSchema
   public async generateInterviewSimulationsAI(
     cv: ParsedCV,
     targetPos: TargetPosition
   ): Promise<InterviewQuestion[]> {
     const startTime = Date.now();
-    const ai = getAIClient();
+    const prompt = loadPrompt('interview_coach.txt', {
+      NAME: cv.name,
+      TARGET_TITLE: targetPos.title,
+    });
 
-    const prompt = `Anda adalah Executive AI Interview Coach.
-Buat simulasi wawancara kerja terperinci untuk kandidat dengan CV ${cv.name} yang melamar posisi "${targetPos.title}".
-
-Hasilkan 4 pertanyaan simulasi wawancara yang terbagi dalam kategori:
-1. HR & Culture Fit
-2. Technical Skills
-3. Behavioral & Situational
-4. System Design / Case Study
-
-Kembalikan HANYA JSON array:
-[
-  {
-    "id": string,
-    "category": "HR" | "Technical" | "Behavioral" | "Case Study",
-    "question": string,
-    "whyHRAsks": string,
-    "keyPointsToCover": [string],
-    "idealAnswer": string
-  }
-]`;
+    const interviewSchema = {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          id: { type: Type.STRING },
+          category: { type: Type.STRING },
+          question: { type: Type.STRING },
+          whyHRAsks: { type: Type.STRING },
+          keyPointsToCover: { type: Type.ARRAY, items: { type: Type.STRING } },
+          idealAnswer: { type: Type.STRING },
+        },
+      },
+    };
 
     try {
-      const res = await ai.models.generateContent({
-        model: 'gemini-3.6-flash',
-        contents: prompt,
-        config: { responseMimeType: 'application/json' },
+      const res = await callWithRetry('INTERVIEW_COACH', async () => {
+        const ai = getAIClient();
+        return await ai.models.generateContent({
+          model: 'gemini-3.6-flash',
+          contents: prompt,
+          config: {
+            responseMimeType: 'application/json',
+            responseSchema: interviewSchema,
+          },
+        });
       });
 
       const data = extractCleanJSON(res.text || '[]');
@@ -594,60 +630,40 @@ Kembalikan HANYA JSON array:
       {
         id: 'iq_01',
         category: 'HR',
-        question: 'Ceritakan tentang pengalaman Anda dan mengapa Anda tertarik bertransisi/berkarir di posisi Full Stack AI Engineer ini?',
-        whyHRAsks: 'HR ingin menilai kejelasan motivasi karir, kemampuan komunikasi, dan alignment value kandidat dengan visi perusahaan.',
-        keyPointsToCover: ['Ringkasan latar belakang teknis', 'Proyek AI / Fullstack yang pernah ditangani', 'Antusiasme terhadap teknologi Gemini & Cloud'],
-        idealAnswer: 'Saya telah berkarir sebagai Software Engineer dengan fokus pada React, TypeScript, dan Node.js/Python. Dalam proyek terbaru saya, saya mengintegrasikan Google Gemini LLM yang berhasil memotong waktu tunggu customer support hingga 45%. Perusahaan Anda saat ini memimpin inovasi AI generatif di Indonesia, dan saya sangat terdorong untuk memberikan kontribusi nyata dalam skala besar.',
-      },
-      {
-        id: 'iq_02',
-        category: 'Technical',
-        question: 'Bagaimana Anda merancang pencarian kemiripan teks (vector similarity search) menggunakan PostgreSQL pgvector dan Gemini Embeddings?',
-        whyHRAsks: 'Menguji kedalaman pemahaman teknis kandidat mengenai arsitektur database modern, embedding vectors, dan efisiensi query.',
-        keyPointsToCover: ['Generate 768-dim embeddings via Gemini', 'Gunakan tipe data vector di PostgreSQL', 'Gunakan indeks HNSW / IVFFlat dengan Cosine Distance (<=>)'],
-        idealAnswer: 'Pertama, teks CV dan Job Description dikonversi menjadi vektor 768 dimensi menggunakan Gemini Embedding API. Kemudian data disimpan di PostgreSQL dalam kolom tipe vector(768). Untuk query performa tinggi, kita membuat indeks HNSW dengan cosine distance operator (<=>). Query SELECT membandingkan cosine similarity dan mengembalikan top N hasil kecocokan teratas secara instan.',
-      },
-      {
-        id: 'iq_03',
-        category: 'Behavioral',
-        question: 'Ceritakan situasi saat Anda menghadapi krisis produksi atau kegagalan sistem. Bagaimana Anda menyelesaikannya?',
-        whyHRAsks: 'Menilai pemecahan masalah di bawah tekanan, akuntabilitas, dan kerja sama tim (STAR method).',
-        keyPointsToCover: ['Situation: Latency spike pada API server', 'Task: Mengidentifikasi bottleneck', 'Action: Memasang profiling & caching', 'Result: Latency turun 80%'],
-        idealAnswer: 'Pada saat perilisan fitur baru, API server kami mengalami lonjakan latensi hingga 4 detik akibat query N+1 pada database. Saya segera memimpin triage, menambahkan Redis caching layer untuk query frekuensi tinggi, dan melakukan refactoring query dengan join terindeks. Hasilnya latensi kembali normal menjadi 180ms dan krisis selesai dalam waktu 45 menit tanpa data loss.',
-      },
-      {
-        id: 'iq_04',
-        category: 'Case Study',
-        question: 'Bagaimana Anda merancang arsitektur pencari lowongan kerja otomatis yang tahan beban tinggi, terhindar dari duplikasi data, dan memicu notifikasi otomatis bagi user?',
-        whyHRAsks: 'Menguji kemampuan arsitektur end-to-end, clean architecture, scheduler, deduplikasi, dan event notification.',
-        keyPointsToCover: ['Cron Scheduler', 'Gemini Search Grounding API', 'Job Normalizer & Canonical Hashing', 'PGVector Match Engine', 'Notification Service'],
-        idealAnswer: 'Arsitektur dimulai dengan Cron Scheduler yang berjalan setiap 6 jam memicu job finder runner. Runner memanggil Gemini Search Grounding API untuk mengambil lowongan terbaru. Data mentah masuk ke jobs_raw, lalu dibersihkan oleh Job Normalizer engine yang menghapus duplikasi berdasarkan hash title+company. Data bersih disimpan di jobs_processed dan di-index menggunakan pgvector. Terakhir, Match Engine membandingkan CV kandidat; jika match score > 85%, sistem mengirim notifikasi real-time via WebSockets & Email.',
+        question: 'Ceritakan tentang pengalaman Anda dan mengapa tertarik bertransisi ke posisi ini?',
+        whyHRAsks: 'HR ingin menilai kejelasan motivasi karir dan kemampuan komunikasi.',
+        keyPointsToCover: ['Ringkasan latar belakang teknis', 'Proyek AI / Fullstack'],
+        idealAnswer: 'Saya telah berkarir sebagai Software Engineer dengan fokus pada React, TypeScript, dan Node.js/Python.',
       },
     ];
   }
 
+  // 7. INTERVIEW ANSWER EVALUATOR with responseSchema
   public async evaluateInterviewAnswerAI(question: string, answer: string, targetPosition: string): Promise<{ score: number; feedback: string }> {
     const startTime = Date.now();
-    const ai = getAIClient();
-
-    const prompt = `Bertindaklah sebagai Senior HR & Tech Hiring Manager untuk posisi "${targetPosition}".
-Evaluasi jawaban kandidat untuk pertanyaan berikut:
-
+    const prompt = `Evaluasi jawaban wawancara untuk posisi "${targetPosition}":
 Pertanyaan: "${question}"
-Jawaban Kandidat: "${answer}"
+Jawaban: "${answer}"`;
 
-Berikan skor (0-100) dan umpan balik konstruktif singkat (2-3 kalimat) dalam bahasa Indonesia.
-Kembalikan HANYA JSON:
-{
-  "score": number,
-  "feedback": string
-}`;
+    const evalSchema = {
+      type: Type.OBJECT,
+      properties: {
+        score: { type: Type.INTEGER },
+        feedback: { type: Type.STRING },
+      },
+    };
 
     try {
-      const res = await ai.models.generateContent({
-        model: 'gemini-3.6-flash',
-        contents: prompt,
-        config: { responseMimeType: 'application/json' },
+      const res = await callWithRetry('INTERVIEW_EVAL', async () => {
+        const ai = getAIClient();
+        return await ai.models.generateContent({
+          model: 'gemini-3.6-flash',
+          contents: prompt,
+          config: {
+            responseMimeType: 'application/json',
+            responseSchema: evalSchema,
+          },
+        });
       });
 
       const data = extractCleanJSON(res.text || '{}');
@@ -659,7 +675,7 @@ Kembalikan HANYA JSON:
 
     return {
       score: 88,
-      feedback: 'Jawaban Anda sudah mencakup struktur teknis dan dampak yang jelas. Disarankan untuk menambahkan contoh kuantitatif lebih spesifik.',
+      feedback: 'Jawaban Anda sudah mencakup struktur teknis dan dampak yang jelas.',
     };
   }
 }
