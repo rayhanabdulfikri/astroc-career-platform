@@ -34,7 +34,14 @@ import {
 
 export function App() {
   const [activeTab, setActiveTab] = useState<string>('dashboard');
-  const [isDark, setIsDark] = useState<boolean>(true);
+  // Initialize dark mode from localStorage (default: dark)
+  const [isDark, setIsDark] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('astroc-theme');
+      if (saved !== null) return saved === 'dark';
+    } catch {}
+    return true; // default to dark
+  });
   const [user, setUser] = useState<AuthUser | null>(null);
   const [authToken, setAuthToken] = useState<string | null>(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
@@ -109,13 +116,19 @@ export function App() {
     return () => unsubscribe();
   }, []);
 
-  // Sync dark class on html document
+  // Sync dark class on <html> and persist to localStorage
   useEffect(() => {
+    const root = document.documentElement;
     if (isDark) {
-      document.documentElement.classList.add('dark');
+      root.classList.add('dark');
+      root.classList.remove('light');
     } else {
-      document.documentElement.classList.remove('dark');
+      root.classList.remove('dark');
+      root.classList.add('light');
     }
+    try {
+      localStorage.setItem('astroc-theme', isDark ? 'dark' : 'light');
+    } catch {}
   }, [isDark]);
 
   const getAuthHeaders = () => {

@@ -1,10 +1,25 @@
 <!DOCTYPE html>
-<html lang="id" class="dark">
+<html lang="id">
   <head>
+    <!-- Anti-flash: apply theme from localStorage BEFORE React renders to prevent white flash -->
+    <script>
+      (function() {
+        try {
+          var theme = localStorage.getItem('astroc-theme');
+          if (theme === 'light') {
+            document.documentElement.classList.remove('dark');
+          } else {
+            document.documentElement.classList.add('dark');
+          }
+        } catch(e) {
+          document.documentElement.classList.add('dark');
+        }
+      })();
+    </script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ASTROC - AI Career Intelligence & Job Discovery Platform</title>
-    <meta name="description" content="Platform Intelijen Karir Berbasis AI (Gemini 3.6 Flash, Supabase pgvector & Search Grounding). Evaluasi CV ATS/HR, Pencocokan Semantik Lowongan Kerja, & Strategic Roadmap." />
+    <title>ASTROC - AI Career Intelligence &amp; Job Discovery Platform</title>
+    <meta name="description" content="Platform Intelijen Karir Berbasis AI (Gemini Flash, Supabase pgvector &amp; Search Grounding). Evaluasi CV ATS/HR, Pencocokan Semantik Lowongan Kerja, &amp; Strategic Roadmap." />
     <meta name="keywords" content="ASTROC, AI Career, ATS Checker, Resume Evaluator, Job Search Grounding, pgvector, Gemini AI" />
     <meta name="author" content="Rayhan Abdul" />
     <meta name="theme-color" content="#050507" />
@@ -13,14 +28,14 @@
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://astroc-career-platform.vercel.app/" />
     <meta property="og:title" content="ASTROC - AI Career Intelligence Platform" />
-    <meta property="og:description" content="Evaluasi CV Berbasis Gemini 3.6 AI, Matching Semantik pgvector, & Rekomendasi Karir Otomatis." />
-    <meta property="og:image" content="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=1200&auto=format&fit=crop&q=80" />
+    <meta property="og:description" content="Evaluasi CV Berbasis Gemini AI, Matching Semantik pgvector, &amp; Rekomendasi Karir Otomatis." />
+    <meta property="og:image" content="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=1200&amp;auto=format&amp;fit=crop&amp;q=80" />
 
     <!-- Twitter -->
     <meta property="twitter:card" content="summary_large_image" />
     <meta property="twitter:title" content="ASTROC - AI Career Intelligence Platform" />
-    <meta property="twitter:description" content="Evaluasi CV Berbasis Gemini 3.6 AI & Matching Semantik pgvector." />
-    <meta property="twitter:image" content="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=1200&auto=format&fit=crop&q=80" />
+    <meta property="twitter:description" content="Evaluasi CV Berbasis Gemini AI &amp; Matching Semantik pgvector." />
+    <meta property="twitter:image" content="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=1200&amp;auto=format&amp;fit=crop&amp;q=80" />
 
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
