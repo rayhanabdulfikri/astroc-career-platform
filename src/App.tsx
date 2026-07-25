@@ -165,7 +165,7 @@ export function App() {
       setLoading(true);
       addToast('info', 'Mengekstrak CV & Menjalankan Gemini AI Engine...');
       try {
-        let res;
+        let res: Response;
         if (fileOrRawText instanceof File) {
           const formData = new FormData();
           formData.append('file', fileOrRawText);
@@ -181,7 +181,17 @@ export function App() {
             body: JSON.stringify({ rawText: fileOrRawText, fileName, presetId }),
           });
         }
-        const data = await res.json();
+
+        const rawText = await res.text();
+        let data: any;
+        try {
+          data = JSON.parse(rawText);
+        } catch (e) {
+          console.error('Server response parsing error:', rawText);
+          addToast('error', `Respons Server (${res.status}): ${rawText.slice(0, 80)}`);
+          return;
+        }
+
         if (data.parsed) {
           setActiveCV(data.parsed);
           setCvAnalysis(data.analysis);

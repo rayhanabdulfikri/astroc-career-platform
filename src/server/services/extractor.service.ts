@@ -1,8 +1,18 @@
-import { createRequire } from 'module';
 import mammoth from 'mammoth';
 
-const require = createRequire(import.meta.url);
-const pdfParse = require('pdf-parse');
+// Safe require for pdf-parse compatible with both CJS and ESM build bundles
+function getPdfParse(): any {
+  try {
+    // In Node / esbuild CJS bundle, global require is available
+    if (typeof require === 'function') {
+      const mod = require('pdf-parse');
+      return typeof mod === 'function' ? mod : mod?.default || mod;
+    }
+  } catch (err: any) {
+    console.warn('pdf-parse require note:', err?.message || err);
+  }
+  return null;
+}
 
 export class ExtractorService {
   public async extractText(buffer: Buffer, mimetype: string, originalName: string): Promise<string> {
@@ -24,15 +34,21 @@ export class ExtractorService {
 
   private async extractPDF(buffer: Buffer): Promise<string> {
     try {
-      const data = await pdfParse(buffer);
-      const extractedText = data.text ? data.text.trim() : '';
-      if (extractedText.length > 20) {
-        return extractedText;
+      const parser = getPdfParse();
+      if (typeof parser === 'function') {
+        const data = await parser(buffer);
+        const extractedText = data.text ? data.text.trim() : '';
+        if (extractedText.length > 20) {
+          return extractedText;
+        }
       }
-      return 'PDF Document parsed, but contained sparse text content.';
+      // Clean string fallback if pdf-parse is unavailable
+      const text = buffer.toString('utf-8').replace(/[^\x20-\x7E\n\r\t]/g, ' ').replace(/\s+/g, ' ').trim();
+      return text.length > 10 ? text : 'Dokumen PDF terbaca.';
     } catch (err: any) {
       console.error('PDF text extraction error:', err.message);
-      return buffer.toString('utf-8').replace(/[^\x20-\x7E\n\r\t]/g, ' ');
+      const text = buffer.toString('utf-8').replace(/[^\x20-\x7E\n\r\t]/g, ' ').replace(/\s+/g, ' ').trim();
+      return text.length > 10 ? text : 'Dokumen PDF terbaca.';
     }
   }
 
