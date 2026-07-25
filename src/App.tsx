@@ -163,7 +163,7 @@ export function App() {
   const handleUploadCV = async (fileOrRawText: File | string, fileName: string, presetId?: string) => {
     requireAuthAction(async () => {
       setLoading(true);
-      addToast('info', 'Mengekstrak CV & Menjalankan Gemini 3.5 Flash Lite Engine...');
+      addToast('info', 'Mengekstrak CV & Menjalankan Gemini AI Engine...');
       try {
         let res;
         if (fileOrRawText instanceof File) {
@@ -187,10 +187,12 @@ export function App() {
           setCvAnalysis(data.analysis);
           addToast('success', `CV ${data.parsed.name} berhasil dianalisis dengan ATS Score ${data.analysis.ats.atsScore}%!`);
           loadInitialData();
+        } else {
+          addToast('error', data.error || data.message || 'Gagal memproses CV. Silakan coba lagi.');
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error(err);
-        addToast('error', 'Gagal memproses CV. Silakan coba lagi.');
+        addToast('error', err?.message || 'Gagal memproses CV. Silakan coba lagi.');
       } finally {
         setLoading(false);
       }
@@ -201,7 +203,7 @@ export function App() {
   const handleTriggerSearchGrounding = async () => {
     requireAuthAction(async () => {
       setSearching(true);
-      addToast('info', 'Gemini 3.5 Flash Lite Grounding mencari lowongan kerja nyata...');
+      addToast('info', 'Gemini Grounding mencari lowongan kerja nyata...');
       try {
         const res = await fetch('/api/jobs/search-grounding', {
           method: 'POST',
@@ -273,7 +275,7 @@ export function App() {
   const handleRegenerateRoadmap = async () => {
     requireAuthAction(async () => {
       setLoading(true);
-      addToast('info', 'Gemini 3.5 Flash Lite membuat ulang Strategic Career Roadmap...');
+      addToast('info', 'Gemini AI membuat ulang Strategic Career Roadmap...');
       try {
         const res = await fetch('/api/roadmap/generate', { method: 'POST', headers: getAuthHeaders() });
         const data = await res.json();

@@ -1,7 +1,8 @@
-import * as pdfParseModule from 'pdf-parse';
+import { createRequire } from 'module';
 import mammoth from 'mammoth';
 
-const pdfParse = (pdfParseModule as any).default || pdfParseModule;
+const require = createRequire(import.meta.url);
+const pdfParse = require('pdf-parse');
 
 export class ExtractorService {
   public async extractText(buffer: Buffer, mimetype: string, originalName: string): Promise<string> {
@@ -31,7 +32,7 @@ export class ExtractorService {
       return 'PDF Document parsed, but contained sparse text content.';
     } catch (err: any) {
       console.error('PDF text extraction error:', err.message);
-      return buffer.toString('utf-8');
+      return buffer.toString('utf-8').replace(/[^\x20-\x7E\n\r\t]/g, ' ');
     }
   }
 

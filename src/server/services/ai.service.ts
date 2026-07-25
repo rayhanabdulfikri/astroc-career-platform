@@ -14,7 +14,7 @@ import {
 } from '../../types';
 
 let genAIClient: GoogleGenAI | null = null;
-const AI_MODEL_NAME = 'gemini-3.5-flash-lite';
+const CANDIDATE_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
 
 function getAIClient(): GoogleGenAI {
   if (!genAIClient) {
@@ -31,12 +31,35 @@ function getAIClient(): GoogleGenAI {
   return genAIClient;
 }
 
-// Exponential Backoff Retry Utility for HTTP 429 & Timeouts
+// Robust execution with model fallback & exponential retries
+async function generateContentWithModelFallback(
+  contents: string,
+  config: any
+): Promise<any> {
+  const ai = getAIClient();
+  let lastError: any = null;
+
+  for (const modelName of CANDIDATE_MODELS) {
+    try {
+      return await ai.models.generateContent({
+        model: modelName,
+        contents,
+        config,
+      });
+    } catch (err: any) {
+      lastError = err;
+      console.warn(`Model ${modelName} call note: ${err?.message || 'Error'}, trying next candidate model...`);
+    }
+  }
+
+  throw lastError || new Error('All candidate Gemini models failed.');
+}
+
 async function callWithRetry<T>(
   actionName: string,
   fn: () => Promise<T>,
-  maxRetries = 3,
-  initialDelayMs = 1000
+  maxRetries = 2,
+  initialDelayMs = 800
 ): Promise<T> {
   let attempt = 0;
   let delay = initialDelayMs;
@@ -46,15 +69,12 @@ async function callWithRetry<T>(
       return await fn();
     } catch (err: any) {
       attempt++;
-      const isRateLimit = err?.status === 429 || err?.message?.includes('429') || err?.message?.includes('RESOURCE_EXHAUSTED');
-      const isTimeout = err?.code === 'ETIMEDOUT' || err?.message?.includes('timeout');
-
-      if ((isRateLimit || isTimeout) && attempt < maxRetries) {
+      if (attempt < maxRetries) {
         console.warn(`⚠️ [Gemini AI ${actionName}] Attempt ${attempt} failed (${err?.message || 'Error'}). Retrying in ${delay}ms...`);
         await new Promise((res) => setTimeout(res, delay));
         delay *= 2;
       } else {
-        console.error(`❌ [Gemini AI ${actionName}] Fatal error on attempt ${attempt}:`, err?.message || err);
+        console.error(`❌ [Gemini AI ${actionName}] Error on attempt ${attempt}:`, err?.message || err);
         throw err;
       }
     }
@@ -116,7 +136,7 @@ export class AIService {
     return this.generateEmbedding(text);
   }
 
-  // 1. CV PARSER with responseSchema (Gemini 3.5 Flash Lite)
+  // 1. CV PARSER with responseSchema
   public async parseCV(rawCvText: string, fileName: string): Promise<ParsedCV> {
     const startTime = Date.now();
     const sanitizedText = rawCvText.slice(0, 15000);
@@ -213,20 +233,15 @@ export class AIService {
 
     try {
       const res = await callWithRetry('CV_PARSER', async () => {
-        const ai = getAIClient();
-        return await ai.models.generateContent({
-          model: AI_MODEL_NAME,
-          contents: prompt,
-          config: {
-            responseMimeType: 'application/json',
-            responseSchema: cvSchema,
-          },
+        return await generateContentWithModelFallback(prompt, {
+          responseMimeType: 'application/json',
+          responseSchema: cvSchema,
         });
       });
 
       const parsedData = extractCleanJSON(res.text || '{}');
       const latency = Date.now() - startTime;
-      await logRepository.logAIAction('CV_PARSER', latency, 'success', `Parsed CV with ${AI_MODEL_NAME}: ${fileName}`);
+      await logRepository.logAIAction('CV_PARSER', latency, 'success', `Parsed CV: ${fileName}`);
 
       return {
         id: `cv_${Date.now()}`,
@@ -281,7 +296,7 @@ export class AIService {
     }
   }
 
-  // 2. ATS & HR PIPELINE with responseSchema (Gemini 3.5 Flash Lite)
+  // 2. ATS & HR PIPELINE with responseSchema
   public async analyzeCVFullPipeline(cv: ParsedCV): Promise<CVAnalysisResult> {
     const startTime = Date.now();
 
@@ -340,20 +355,15 @@ export class AIService {
 
     try {
       const res = await callWithRetry('CV_EVALUATION', async () => {
-        const ai = getAIClient();
-        return await ai.models.generateContent({
-          model: AI_MODEL_NAME,
-          contents: combinedPrompt,
-          config: {
-            responseMimeType: 'application/json',
-            responseSchema: analysisSchema,
-          },
+        return await generateContentWithModelFallback(combinedPrompt, {
+          responseMimeType: 'application/json',
+          responseSchema: analysisSchema,
         });
       });
 
       const data = extractCleanJSON(res.text || '{}');
       const latency = Date.now() - startTime;
-      await logRepository.logAIAction('CV_EVALUATION', latency, 'success', `Evaluated CV with ${AI_MODEL_NAME} for ${cv.name}`);
+      await logRepository.logAIAction('CV_EVALUATION', latency, 'success', `Evaluated CV for ${cv.name}`);
 
       return {
         id: `an_${Date.now()}`,
@@ -397,7 +407,7 @@ export class AIService {
     }
   }
 
-  // 3. JOB SEARCH GROUNDING (Gemini 3.5 Flash Lite)
+  // 3. JOB SEARCH GROUNDING
   public async searchJobsWithSearchGrounding(
     targetPos: TargetPosition,
     cvSkills: string[]
@@ -411,13 +421,8 @@ export class AIService {
 
     try {
       const res = await callWithRetry('JOB_SEARCH_GROUNDING', async () => {
-        const ai = getAIClient();
-        return await ai.models.generateContent({
-          model: AI_MODEL_NAME,
-          contents: prompt,
-          config: {
-            tools: [{ googleSearch: {} }],
-          },
+        return await generateContentWithModelFallback(prompt, {
+          tools: [{ googleSearch: {} }],
         });
       });
 
@@ -426,7 +431,7 @@ export class AIService {
 
       const parsedJobs = extractCleanJSON(rawText);
       const latency = Date.now() - startTime;
-      await logRepository.logAIAction('JOB_SEARCH_GROUNDING', latency, 'success', `Found jobs via ${AI_MODEL_NAME} Grounding for ${targetPos.title}`);
+      await logRepository.logAIAction('JOB_SEARCH_GROUNDING', latency, 'success', `Found jobs via Grounding for ${targetPos.title}`);
 
       if (Array.isArray(parsedJobs) && parsedJobs.length > 0) {
         const normalizedJobs: JobProcessed[] = [];
@@ -464,7 +469,7 @@ export class AIService {
     return jobRepository.getJobs();
   }
 
-  // 4. SKILL GAP ANALYZER with responseSchema (Gemini 3.5 Flash Lite)
+  // 4. SKILL GAP ANALYZER with responseSchema
   public async analyzeSkillGapAI(cv: ParsedCV, targetPos: TargetPosition): Promise<SkillGapAnalysis> {
     const startTime = Date.now();
     const prompt = loadPrompt('skill_gap.txt', {
@@ -502,14 +507,9 @@ export class AIService {
 
     try {
       const res = await callWithRetry('SKILL_GAP', async () => {
-        const ai = getAIClient();
-        return await ai.models.generateContent({
-          model: AI_MODEL_NAME,
-          contents: prompt,
-          config: {
-            responseMimeType: 'application/json',
-            responseSchema: gapSchema,
-          },
+        return await generateContentWithModelFallback(prompt, {
+          responseMimeType: 'application/json',
+          responseSchema: gapSchema,
         });
       });
 
@@ -541,7 +541,7 @@ export class AIService {
     };
   }
 
-  // 5. CAREER ROADMAP GENERATOR with responseSchema (Gemini 3.5 Flash Lite)
+  // 5. CAREER ROADMAP GENERATOR with responseSchema
   public async generateCareerRoadmapAI(
     cv: ParsedCV,
     targetPos: TargetPosition,
@@ -580,14 +580,9 @@ export class AIService {
 
     try {
       const res = await callWithRetry('CAREER_ROADMAP', async () => {
-        const ai = getAIClient();
-        return await ai.models.generateContent({
-          model: AI_MODEL_NAME,
-          contents: prompt,
-          config: {
-            responseMimeType: 'application/json',
-            responseSchema: roadmapSchema,
-          },
+        return await generateContentWithModelFallback(prompt, {
+          responseMimeType: 'application/json',
+          responseSchema: roadmapSchema,
         });
       });
 
@@ -629,7 +624,7 @@ export class AIService {
     };
   }
 
-  // 6. EXECUTIVE INTERVIEW COACH with responseSchema (Gemini 3.5 Flash Lite)
+  // 6. EXECUTIVE INTERVIEW COACH with responseSchema
   public async generateInterviewSimulationsAI(
     cv: ParsedCV,
     targetPos: TargetPosition
@@ -657,14 +652,9 @@ export class AIService {
 
     try {
       const res = await callWithRetry('INTERVIEW_COACH', async () => {
-        const ai = getAIClient();
-        return await ai.models.generateContent({
-          model: AI_MODEL_NAME,
-          contents: prompt,
-          config: {
-            responseMimeType: 'application/json',
-            responseSchema: interviewSchema,
-          },
+        return await generateContentWithModelFallback(prompt, {
+          responseMimeType: 'application/json',
+          responseSchema: interviewSchema,
         });
       });
 
@@ -687,7 +677,7 @@ export class AIService {
     ];
   }
 
-  // 7. INTERVIEW ANSWER EVALUATOR with responseSchema (Gemini 3.5 Flash Lite)
+  // 7. INTERVIEW ANSWER EVALUATOR with responseSchema
   public async evaluateInterviewAnswerAI(question: string, answer: string, targetPosition: string): Promise<{ score: number; feedback: string }> {
     const startTime = Date.now();
     const prompt = `Evaluasi jawaban wawancara untuk posisi "${targetPosition}":
@@ -704,14 +694,9 @@ Jawaban: "${answer}"`;
 
     try {
       const res = await callWithRetry('INTERVIEW_EVAL', async () => {
-        const ai = getAIClient();
-        return await ai.models.generateContent({
-          model: AI_MODEL_NAME,
-          contents: prompt,
-          config: {
-            responseMimeType: 'application/json',
-            responseSchema: evalSchema,
-          },
+        return await generateContentWithModelFallback(prompt, {
+          responseMimeType: 'application/json',
+          responseSchema: evalSchema,
         });
       });
 
