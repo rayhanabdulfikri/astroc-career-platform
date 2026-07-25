@@ -1,7 +1,13 @@
 import * as pdfjsLib from 'pdfjs-dist';
 
-// Set up worker for PDF.js using unpkg / cdnjs CDN so Vite doesn't fail on worker resolution
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs`;
+// Use Vite's native local worker import so worker is served directly from local domain / Vercel without external CDN dependencies
+try {
+  // @ts-ignore
+  import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+  pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
+} catch {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version || '4.10.38'}/pdf.worker.min.mjs`;
+}
 
 /**
  * Extract clean text from any PDF (Canva, Word, Adobe, FlateDecode compressed)
@@ -44,26 +50,28 @@ export async function extractPDFText(file: File): Promise<string> {
     console.warn('⚠️ PDF.js extraction note (trying fallback):', err?.message || err);
   }
 
-  // Fallback 1: Extract words with regex matching printable text sequences
+  // Fallback 2: Extract text between parentheses in PDF streams (BT...ET blocks)
   try {
     const arrayBuffer = await file.arrayBuffer();
     const uint8Array = new Uint8Array(arrayBuffer);
     const decoder = new TextDecoder('latin1');
     const rawBytes = decoder.decode(uint8Array);
 
-    // Extract readable English/Indonesian words (>2 chars) from raw bytes
-    const words = rawBytes.match(/[a-zA-Z0-9@._\-\/+]{2,}/g) || [];
-    // Filter out PDF syntax keywords (stream, endstream, FlateDecode, obj, endobj, xref, etc.)
-    const pdfKeywords = new Set([
-      'pdf', 'obj', 'endobj', 'stream', 'endstream', 'xref', 'trailer', 'startxref',
-      'flatedecode', 'length', 'filter', 'type', 'catalog', 'pages', 'page', 'mediabox',
-      'font', 'fontdescriptor', 'encoding', 'winansiencoding', 'subtype', 'type1', 'truetype',
-    ]);
+    const parts: string[] = [];
+    const btEt = /BT\s+([\s\S]*?)\s+ET/g;
+    let m;
+    while ((m = btEt.exec(rawBytes)) !== null) {
+      const strMatch = /\(([^)]*)\)/g;
+      let sm;
+      while ((sm = strMatch.exec(m[1])) !== null) {
+        const t = sm[1].replace(/\\n/g, '\n').replace(/\\r/g, '\r').replace(/\\\\/g, '\\');
+        if (t.trim().length > 1) parts.push(t);
+      }
+    }
 
-    const cleanWords = words.filter(w => !pdfKeywords.has(w.toLowerCase()) && !/^[0-9]+$/.test(w));
-    if (cleanWords.length > 15) {
-      const text = cleanWords.join(' ');
-      console.log('✅ Fallback regex extracted clean words:', text.slice(0, 150) + '...');
+    if (parts.length > 0) {
+      const text = parts.join(' ').replace(/\s+/g, ' ').trim();
+      console.log('✅ Stream regex extracted text:', text.slice(0, 150) + '...');
       return text;
     }
   } catch {}
