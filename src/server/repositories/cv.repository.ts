@@ -100,15 +100,15 @@ export class CVRepository {
     };
   }
 
-  public async saveCV(cv: ParsedCV): Promise<ParsedCV> {
+  public async saveCV(cv: ParsedCV, fileUrl?: string): Promise<ParsedCV> {
     this.fallbackCVs.unshift(cv);
     const supabase = getSupabaseClient();
     if (!supabase) return cv;
 
     await supabase.from('cvs').insert({
-      id: cv.id,
       file_name: cv.fileName,
-      raw_text: cv.rawText,
+      file_url: fileUrl || `https://storage.astroc.ai/cv-files/${cv.fileName}`,
+      raw_text: cv.rawText || cv.summary,
       parsed_json: {
         name: cv.name,
         email: cv.email,
@@ -136,7 +136,6 @@ export class CVRepository {
     if (!supabase) return analysis;
 
     await supabase.from('cv_analysis').insert({
-      id: analysis.id,
       cv_id: analysis.cvId,
       ats_score: analysis.ats.atsScore,
       ats_details: analysis.ats,
