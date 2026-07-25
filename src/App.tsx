@@ -71,6 +71,25 @@ export function App() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
+  // Require Auth Guard for Feature Access
+  const handleSelectTab = (tabId: string) => {
+    if (tabId !== 'dashboard' && !authToken && !user) {
+      addToast('info', 'Silakan daftar atau masuk ke akun ASTROC terlebih dahulu untuk mengakses fitur ini!');
+      setIsAuthModalOpen(true);
+      return;
+    }
+    setActiveTab(tabId);
+  };
+
+  const requireAuthAction = (actionFn: () => void) => {
+    if (!authToken && !user) {
+      addToast('info', 'Silakan login/daftar akun terlebih dahulu untuk menggunakan fitur AI!');
+      setIsAuthModalOpen(true);
+      return;
+    }
+    actionFn();
+  };
+
   // Listen to Firebase Auth state
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
@@ -131,16 +150,6 @@ export function App() {
         setActiveCV(cvRes.activeCV);
         setCvAnalysis(cvRes.analysis);
       }
-
-      if (!user) {
-        setUser({
-          uid: 'usr_001',
-          email: 'rayhan.developer@example.com',
-          fullName: 'Rayhan AI Engineer',
-          avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
-          createdAt: new Date().toISOString(),
-        });
-      }
     } catch (err) {
       console.error('Error fetching initial data:', err);
     }
@@ -151,112 +160,133 @@ export function App() {
   }, [authToken]);
 
   // Upload CV handler
-  const handleUploadCV = async (rawText: string, fileName: string, presetId?: string) => {
-    setLoading(true);
-    addToast('info', 'Mengekstrak CV & Menjalankan 3-in-1 Gemini AI Engine...');
-    try {
-      const res = await fetch('/api/cv/upload', {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ rawText, fileName, presetId }),
-      });
-      const data = await res.json();
-      if (data.parsed) {
-        setActiveCV(data.parsed);
-        setCvAnalysis(data.analysis);
-        addToast('success', `CV ${data.parsed.name} berhasil dianalisis dengan ATS Score ${data.analysis.ats.atsScore}%!`);
-        loadInitialData();
+  const handleUploadCV = async (fileOrRawText: File | string, fileName: string, presetId?: string) => {
+    requireAuthAction(async () => {
+      setLoading(true);
+      addToast('info', 'Mengekstrak CV & Menjalankan Gemini 3.5 Flash Lite Engine...');
+      try {
+        let res;
+        if (fileOrRawText instanceof File) {
+          const formData = new FormData();
+          formData.append('file', fileOrRawText);
+          res = await fetch('/api/cv/upload', {
+            method: 'POST',
+            headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+            body: formData,
+          });
+        } else {
+          res = await fetch('/api/cv/upload', {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ rawText: fileOrRawText, fileName, presetId }),
+          });
+        }
+        const data = await res.json();
+        if (data.parsed) {
+          setActiveCV(data.parsed);
+          setCvAnalysis(data.analysis);
+          addToast('success', `CV ${data.parsed.name} berhasil dianalisis dengan ATS Score ${data.analysis.ats.atsScore}%!`);
+          loadInitialData();
+        }
+      } catch (err) {
+        console.error(err);
+        addToast('error', 'Gagal memproses CV. Silakan coba lagi.');
+      } finally {
+        setLoading(false);
       }
-    } catch (err) {
-      console.error(err);
-      addToast('error', 'Gagal memproses CV. Silakan coba lagi.');
-    } finally {
-      setLoading(false);
-    }
+    });
   };
 
   // Trigger Live Search Grounding
   const handleTriggerSearchGrounding = async () => {
-    setSearching(true);
-    addToast('info', 'Gemini Search Grounding mencari lowongan kerja nyata terbaru di Google...');
-    try {
-      const res = await fetch('/api/jobs/search-grounding', {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({
-          query: dashboardData?.targetPosition?.title || 'Full Stack Engineer',
-        }),
-      });
-      const data = await res.json();
-      if (data.jobs) {
-        setJobs(data.jobs);
-        addToast('success', `Berhasil menemukan ${data.count || data.foundCount} lowongan kerja baru via Search Grounding!`);
-        loadInitialData();
+    requireAuthAction(async () => {
+      setSearching(true);
+      addToast('info', 'Gemini 3.5 Flash Lite Grounding mencari lowongan kerja nyata...');
+      try {
+        const res = await fetch('/api/jobs/search-grounding', {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({
+            query: dashboardData?.targetPosition?.title || 'Full Stack Engineer',
+          }),
+        });
+        const data = await res.json();
+        if (data.jobs) {
+          setJobs(data.jobs);
+          addToast('success', `Berhasil menemukan ${data.count || data.foundCount} lowongan kerja baru via Search Grounding!`);
+          loadInitialData();
+        }
+      } catch (err) {
+        console.error(err);
+        addToast('error', 'Gagal menjalankan Search Grounding.');
+      } finally {
+        setSearching(false);
       }
-    } catch (err) {
-      console.error(err);
-      addToast('error', 'Gagal menjalankan Search Grounding.');
-    } finally {
-      setSearching(false);
-    }
+    });
   };
 
   // Trigger Scheduler
   const handleManualTriggerScheduler = async () => {
-    setLoadingScheduler(true);
-    addToast('info', 'Menjalankan Background Job Discovery Scheduler...');
-    try {
-      const res = await fetch('/api/admin/trigger-scheduler', {
-        method: 'POST',
-        headers: getAuthHeaders(),
-      });
-      const data = await res.json();
-      if (data.success) {
-        addToast('success', `Scheduler selesai! ${data.discoveredJobsCount} lowongan baru ter-index & ter-deduplikasi.`);
-        loadInitialData();
+    requireAuthAction(async () => {
+      setLoadingScheduler(true);
+      addToast('info', 'Menjalankan Background Job Discovery Scheduler...');
+      try {
+        const res = await fetch('/api/admin/trigger-scheduler', {
+          method: 'POST',
+          headers: getAuthHeaders(),
+        });
+        const data = await res.json();
+        if (data.success) {
+          addToast('success', `Scheduler selesai! ${data.discoveredJobsCount} lowongan baru ter-index.`);
+          loadInitialData();
+        }
+      } catch (err) {
+        console.error(err);
+        addToast('error', 'Gagal menjalankan scheduler.');
+      } finally {
+        setLoadingScheduler(false);
       }
-    } catch (err) {
-      console.error(err);
-      addToast('error', 'Gagal menjalankan scheduler.');
-    } finally {
-      setLoadingScheduler(false);
-    }
+    });
   };
 
   // Update Target Position
   const handleSaveTargetPosition = async (updated: Partial<TargetPosition>) => {
-    try {
-      const res = await fetch('/api/target-position', {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify(updated),
-      });
-      const data = await res.json();
-      if (data.targetPosition) {
-        addToast('success', 'Target Position berhasil diperbarui!');
-        loadInitialData();
+    requireAuthAction(async () => {
+      try {
+        const res = await fetch('/api/target-position', {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify(updated),
+        });
+        const data = await res.json();
+        if (data.targetPosition) {
+          addToast('success', 'Target Position berhasil diperbarui!');
+          loadInitialData();
+        }
+      } catch (err) {
+        console.error(err);
       }
-    } catch (err) {
-      console.error(err);
-    }
+    });
   };
 
   // Re-generate Roadmap
   const handleRegenerateRoadmap = async () => {
-    setLoading(true);
-    addToast('info', 'Gemini AI membuat ulang Strategic Career Roadmap...');
-    try {
-      const res = await fetch('/api/roadmap/generate', { method: 'POST', headers: getAuthHeaders() });
-      const data = await res.json();
-      if (data.roadmap) {
-        setRoadmap(data.roadmap);
-        addToast('success', 'Career Roadmap berhasil diperbarui!');
+    requireAuthAction(async () => {
+      setLoading(true);
+      addToast('info', 'Gemini 3.5 Flash Lite membuat ulang Strategic Career Roadmap...');
+      try {
+        const res = await fetch('/api/roadmap/generate', { method: 'POST', headers: getAuthHeaders() });
+        const data = await res.json();
+        if (data.roadmap) {
+          setRoadmap(data.roadmap);
+          addToast('success', 'Career Roadmap berhasil diperbarui!');
+        }
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoading(false);
       }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
+    });
   };
 
   // Mark notifications read
@@ -277,7 +307,7 @@ export function App() {
       {/* Global Navbar */}
       <Navbar
         activeTab={activeTab}
-        setActiveTab={setActiveTab}
+        setActiveTab={handleSelectTab}
         user={user}
         notifications={notifications}
         onMarkNotificationsRead={handleMarkNotifsRead}
@@ -288,27 +318,27 @@ export function App() {
 
       {/* Main Container */}
       <main className="mx-auto max-w-7xl px-4 sm:px-6 py-6 space-y-8">
-        {/* LANDING / HERO COMPONENT IF TAB IS DASHBOARD & NO ACTIVE CV */}
+        {/* LANDING / HERO COMPONENT IF TAB IS DASHBOARD */}
         {activeTab === 'dashboard' && (
           <>
             <HeroSection
-              onStartUpload={() => setActiveTab('cv_analysis')}
-              onExploreJobs={() => setActiveTab('job_finder')}
+              onStartUpload={() => handleSelectTab('cv_analysis')}
+              onExploreJobs={() => handleSelectTab('job_finder')}
             />
 
             {/* Main Overview Metrics */}
             {dashboardData && (
               <OverviewCards
                 data={dashboardData}
-                onNavigateTab={(tab) => setActiveTab(tab)}
-                onOpenTargetModal={() => setIsTargetModalOpen(true)}
+                onNavigateTab={(tab) => handleSelectTab(tab)}
+                onOpenTargetModal={() => requireAuthAction(() => setIsTargetModalOpen(true))}
               />
             )}
 
             <HowItWorks />
             <FeatureGrid />
             <FAQSection />
-            <CTASection onStartUpload={() => setActiveTab('cv_analysis')} />
+            <CTASection onStartUpload={() => handleSelectTab('cv_analysis')} />
           </>
         )}
 
@@ -371,7 +401,7 @@ export function App() {
         onLoginSuccess={(loggedInUser, token) => {
           setUser(loggedInUser);
           if (token) setAuthToken(token);
-          addToast('success', `Selamat datang kembali, ${loggedInUser.fullName}!`);
+          addToast('success', `Selamat datang kembali, ${loggedInUser.fullName}! Akses fitur AI ASTROC kini aktif.`);
         }}
       />
 
