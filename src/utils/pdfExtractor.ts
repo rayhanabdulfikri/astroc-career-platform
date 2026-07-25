@@ -1,13 +1,8 @@
 import * as pdfjsLib from 'pdfjs-dist';
+// @ts-ignore
+import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
-// Use Vite's native local worker import so worker is served directly from local domain / Vercel without external CDN dependencies
-try {
-  // @ts-ignore
-  import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-  pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
-} catch {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version || '4.10.38'}/pdf.worker.min.mjs`;
-}
+pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
 /**
  * Extract clean text from any PDF (Canva, Word, Adobe, FlateDecode compressed)
