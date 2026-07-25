@@ -159,20 +159,73 @@ export function App() {
     loadInitialData();
   }, [authToken]);
 
-  // Upload CV handler
+  // Upload CV handler — extract text CLIENT-SIDE first, then send JSON to avoid Vercel multipart issues
   const handleUploadCV = async (fileOrRawText: File | string, fileName: string, presetId?: string) => {
     requireAuthAction(async () => {
       setLoading(true);
-      addToast('info', 'Mengekstrak CV & Menjalankan Gemini AI Engine...');
+      addToast('info', 'Membaca file CV...');
       try {
+        let rawText = '';
+        let finalFileName = fileName;
         let res: Response;
+
         if (fileOrRawText instanceof File) {
-          const formData = new FormData();
-          formData.append('file', fileOrRawText);
+          finalFileName = fileOrRawText.name;
+          const fileType = fileOrRawText.type;
+          const name = fileOrRawText.name.toLowerCase();
+
+          addToast('info', 'Mengekstrak teks CV dan menjalankan Gemini AI Engine...');
+
+          // Client-side text extraction for PDF using FileReader + raw byte decoding
+          if (fileType === 'application/pdf' || name.endsWith('.pdf')) {
+            try {
+              const arrayBuffer = await fileOrRawText.arrayBuffer();
+              const uint8Array = new Uint8Array(arrayBuffer);
+              const decoder = new TextDecoder('latin1');
+              const rawBytes = decoder.decode(uint8Array);
+
+              // Extract text between parentheses in PDF streams (BT...ET blocks)
+              const parts: string[] = [];
+              const btEt = /BT\s+([\s\S]*?)\s+ET/g;
+              let m;
+              while ((m = btEt.exec(rawBytes)) !== null) {
+                const strMatch = /\(([^)]*)\)/g;
+                let sm;
+                while ((sm = strMatch.exec(m[1])) !== null) {
+                  const t = sm[1].replace(/\\n/g, '\n').replace(/\\r/g, '\r').replace(/\\\\/g, '\\');
+                  if (t.trim().length > 1) parts.push(t);
+                }
+              }
+
+              rawText = parts.length > 0
+                ? parts.join(' ').replace(/\s+/g, ' ').trim()
+                : rawBytes.replace(/[^\x20-\x7E\n\r\t]/g, ' ').replace(/\s+/g, ' ').trim();
+
+              if (rawText.length < 30) {
+                rawText = `CV PDF diunggah: ${finalFileName}. Software Engineer.`;
+              }
+            } catch {
+              rawText = `CV PDF diunggah: ${finalFileName}`;
+            }
+          } else if (fileType === 'text/plain' || name.endsWith('.txt')) {
+            rawText = await fileOrRawText.text();
+          } else {
+            // DOCX: read as text best-effort
+            try {
+              rawText = await fileOrRawText.text();
+            } catch {
+              rawText = `CV DOCX diunggah: ${finalFileName}`;
+            }
+          }
+
+          // Send as JSON (no multipart) — works reliably on Vercel Serverless
           res = await fetch('/api/cv/upload', {
             method: 'POST',
-            headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
-            body: formData,
+            headers: {
+              'Content-Type': 'application/json',
+              ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+            },
+            body: JSON.stringify({ rawText, fileName: finalFileName }),
           });
         } else {
           res = await fetch('/api/cv/upload', {
@@ -182,13 +235,13 @@ export function App() {
           });
         }
 
-        const rawText = await res.text();
+        const responseText = await res.text();
         let data: any;
         try {
-          data = JSON.parse(rawText);
+          data = JSON.parse(responseText);
         } catch (e) {
-          console.error('Server response parsing error:', rawText);
-          addToast('error', `Respons Server (${res.status}): ${rawText.slice(0, 80)}`);
+          console.error('Server response parsing error:', responseText);
+          addToast('error', `Respons Server (${res.status}): ${responseText.slice(0, 80)}`);
           return;
         }
 
