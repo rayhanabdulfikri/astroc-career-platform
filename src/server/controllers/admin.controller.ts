@@ -9,10 +9,14 @@ export async function triggerScheduler(req: Request, res: Response, next: NextFu
     return sendSuccess(res, {
       status: 'success',
       discoveredJobsCount: result.jobsFound,
+      highMatchCount: result.highMatchCount,
+      retriesUsed: result.retriesUsed,
       schedulerState: {
         isRunning: jobScheduler.isRunning,
         lastRunTime: jobScheduler.lastRunTime,
+        nextScheduledRun: jobScheduler.nextScheduledRun,
         runCount: jobScheduler.runCount,
+        failedRetriesCount: jobScheduler.failedRetriesCount,
       },
       result,
     });
@@ -29,7 +33,9 @@ export async function getLogs(req: Request, res: Response, next: NextFunction) {
       scheduler: {
         isRunning: jobScheduler.isRunning,
         lastRunTime: jobScheduler.lastRunTime,
+        nextScheduledRun: jobScheduler.nextScheduledRun,
         runCount: jobScheduler.runCount,
+        failedRetriesCount: jobScheduler.failedRetriesCount,
       },
     });
   } catch (err) {

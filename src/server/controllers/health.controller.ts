@@ -1,13 +1,20 @@
-import { Request, Response } from 'express';
+import { Request, Response, NextFunction } from 'express';
+import { jobScheduler } from '../services/scheduler.service';
 import { sendSuccess } from '../utils/response';
 
-export function getHealthStatus(req: Request, res: Response) {
-  return sendSuccess(res, {
-    status: 'ok',
-    service: 'ASTROC – AI Career Intelligence Platform',
-    version: '1.0.0-production',
-    aiModel: 'gemini-3.6-flash',
-    groundingEnabled: true,
-    timestamp: new Date().toISOString(),
-  });
+export async function getHealth(req: Request, res: Response, next: NextFunction) {
+  try {
+    const healthStatus = await jobScheduler.getHealthStatus();
+    return sendSuccess(res, {
+      status: healthStatus.status,
+      timestamp: new Date().toISOString(),
+      service: 'ASTROC AI Platform Core API',
+      version: '2.5.0-production',
+      ...healthStatus,
+    });
+  } catch (err) {
+    next(err);
+  }
 }
+
+export const getHealthStatus = getHealth;
