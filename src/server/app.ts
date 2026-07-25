@@ -60,8 +60,11 @@ export function createApp(): Express {
   app.use(notFoundHandler);
   app.use(errorHandler);
 
-  // Initialize Background Scheduler
-  jobScheduler.startScheduler();
+  // Initialize Background Scheduler — disabled on Vercel Serverless (no persistent processes)
+  // Only run in traditional Node.js server environments (Docker, Railway, Render, etc.)
+  if (!process.env.VERCEL && process.env.NODE_ENV !== 'test') {
+    jobScheduler.startScheduler();
+  }
 
   return app;
 }

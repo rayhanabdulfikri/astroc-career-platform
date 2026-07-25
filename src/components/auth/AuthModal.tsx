@@ -73,6 +73,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setLoading(true);
     setErrorMessage('');
     try {
+      if (!auth) throw new Error('Firebase not configured');
       let userCred;
       if (isRegister) {
         userCred = await createUserWithEmailAndPassword(auth, email || 'user@example.com', password || 'password123');
@@ -82,10 +83,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       const token = await userCred.user.getIdToken();
       await syncUserWithBackend(token, userCred.user.email || email, userCred.user.displayName || undefined);
     } catch (err: any) {
-      console.error('Firebase Auth Error:', err);
+      console.warn('Firebase Auth note (using demo mode):', err?.code || err?.message);
       // Demo fallback if Firebase config is unconfigured
       const mockToken = `fb_jwt_token_${Date.now()}`;
-      await syncUserWithBackend(mockToken, email || 'rayhan.developer@example.com');
+      await syncUserWithBackend(mockToken, email || 'user@astroc.ai');
     } finally {
       setLoading(false);
     }
@@ -95,18 +96,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setLoading(true);
     setErrorMessage('');
     try {
+      if (!auth) throw new Error('Firebase not configured');
       const userCred = await signInWithPopup(auth, googleProvider);
       const token = await userCred.user.getIdToken();
       await syncUserWithBackend(
         token,
-        userCred.user.email || 'rayhan.google@gmail.com',
+        userCred.user.email || 'user@gmail.com',
         userCred.user.displayName || undefined,
         userCred.user.photoURL || undefined
       );
     } catch (err: any) {
-      console.error('Google OAuth Error:', err);
+      console.warn('Google OAuth note (using demo mode):', err?.code || err?.message);
       const mockToken = `fb_jwt_token_${Date.now()}`;
-      await syncUserWithBackend(mockToken, 'rayhan.google@gmail.com', 'Rayhan Google User');
+      await syncUserWithBackend(mockToken, 'user@gmail.com', 'Google User');
     } finally {
       setLoading(false);
     }

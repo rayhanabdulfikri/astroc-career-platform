@@ -1,68 +1,33 @@
-import mammoth from 'mammoth';
-
-// Safe require for pdf-parse compatible with both CJS and ESM build bundles
-function getPdfParse(): any {
-  try {
-    // In Node / esbuild CJS bundle, global require is available
-    if (typeof require === 'function') {
-      const mod = require('pdf-parse');
-      return typeof mod === 'function' ? mod : mod?.default || mod;
-    }
-  } catch (err: any) {
-    console.warn('pdf-parse require note:', err?.message || err);
-  }
-  return null;
-}
+/**
+ * ExtractorService — VERCEL SERVERLESS SAFE
+ * 
+ * mammoth & pdf-parse are NOT imported statically because they use native
+ * Node.js binaries that crash Vercel's serverless runtime on cold start.
+ * 
+ * Since we now extract text CLIENT-SIDE (browser), this service only acts
+ * as a fallback for non-PDF text (TXT/plain) and raw buffer passthrough.
+ */
 
 export class ExtractorService {
   public async extractText(buffer: Buffer, mimetype: string, originalName: string): Promise<string> {
-    const isPDF = mimetype === 'application/pdf' || originalName.toLowerCase().endsWith('.pdf');
-    const isDOCX =
-      mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
-      mimetype === 'application/msword' ||
-      originalName.toLowerCase().endsWith('.docx') ||
-      originalName.toLowerCase().endsWith('.doc');
+    const name = originalName.toLowerCase();
 
-    if (isPDF) {
-      return this.extractPDF(buffer);
-    } else if (isDOCX) {
-      return this.extractDOCX(buffer);
+    // For plain text files, just decode the buffer
+    if (mimetype === 'text/plain' || name.endsWith('.txt')) {
+      return buffer.toString('utf-8').trim();
     }
 
-    return buffer.toString('utf-8');
-  }
-
-  private async extractPDF(buffer: Buffer): Promise<string> {
+    // For all other types (PDF, DOCX): do best-effort ASCII extraction
+    // Real extraction is done CLIENT-SIDE in the browser
     try {
-      const parser = getPdfParse();
-      if (typeof parser === 'function') {
-        const data = await parser(buffer);
-        const extractedText = data.text ? data.text.trim() : '';
-        if (extractedText.length > 20) {
-          return extractedText;
-        }
-      }
-      // Clean string fallback if pdf-parse is unavailable
-      const text = buffer.toString('utf-8').replace(/[^\x20-\x7E\n\r\t]/g, ' ').replace(/\s+/g, ' ').trim();
-      return text.length > 10 ? text : 'Dokumen PDF terbaca.';
-    } catch (err: any) {
-      console.error('PDF text extraction error:', err.message);
-      const text = buffer.toString('utf-8').replace(/[^\x20-\x7E\n\r\t]/g, ' ').replace(/\s+/g, ' ').trim();
-      return text.length > 10 ? text : 'Dokumen PDF terbaca.';
-    }
-  }
-
-  private async extractDOCX(buffer: Buffer): Promise<string> {
-    try {
-      const result = await mammoth.extractRawText({ buffer });
-      const extractedText = result.value ? result.value.trim() : '';
-      if (extractedText.length > 20) {
-        return extractedText;
-      }
-      return 'DOCX Document parsed, but contained sparse text content.';
-    } catch (err: any) {
-      console.error('DOCX text extraction error:', err.message);
-      return buffer.toString('utf-8');
+      const text = buffer
+        .toString('latin1')
+        .replace(/[^\x20-\x7E\n\r\t]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      return text.length > 30 ? text : `Dokumen CV: ${originalName}`;
+    } catch {
+      return `Dokumen CV: ${originalName}`;
     }
   }
 }

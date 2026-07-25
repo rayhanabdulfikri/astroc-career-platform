@@ -90,8 +90,9 @@ export function App() {
     actionFn();
   };
 
-  // Listen to Firebase Auth state
+  // Listen to Firebase Auth state (only if Firebase is properly configured)
   useEffect(() => {
+    if (!auth) return; // Firebase not configured — skip auth listener
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
       if (fbUser) {
         const token = await fbUser.getIdToken();
